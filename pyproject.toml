@@ -1,0 +1,21 @@
+[project]
+name = "mi-smoking-counsellor"
+version = "0.1.0"
+description = "CLI motivational interviewing counsellor for smoking cessation."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pypdf>=5.5.0",
+]
+
+[project.scripts]
+mi-counsellor = "mi_counsellor.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
