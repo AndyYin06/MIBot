@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 
 from mi_counsellor.classifiers import (
@@ -27,6 +26,8 @@ def build_miti_validator() -> MITIFidelityValidator:
 
 
 def print_state(state: SessionState) -> None:
+    import json
+
     data = {
         "safety": {
             "level": state.safety.level.value,
@@ -51,23 +52,48 @@ def print_state(state: SessionState) -> None:
 
 
 def print_miti_report(report: MITIFidelityReport) -> None:
-    data = {
-        "overall_score": report.overall_score,
-        "adherent": report.adherent,
-        "summary": report.summary,
-        "dimension_ratings": [
-            {
-                "dimension": rating.dimension.value,
-                "score": rating.score,
-                "strengths": rating.strengths,
-                "concerns": rating.concerns,
-                "evidence": rating.evidence,
-            }
-            for rating in report.dimension_ratings
-        ],
-        "priority_recommendations": report.priority_recommendations,
+    print(format_miti_report(report))
+
+
+def format_miti_report(report: MITIFidelityReport) -> str:
+    adherence = "Adherent" if report.adherent else "Needs attention"
+    lines = [
+        "MITI Fidelity Report",
+        f"Overall: {report.overall_score:.1f}/5.0 - {adherence}",
+    ]
+    if report.summary:
+        lines.extend(("", report.summary))
+
+    lines.append("")
+    lines.append("Dimension scores")
+    for rating in report.dimension_ratings:
+        lines.append(f"- {_label_dimension(rating.dimension.value)}: {rating.score}/5")
+        if rating.strengths:
+            lines.append(f"  Strengths: {'; '.join(rating.strengths)}")
+        if rating.concerns:
+            lines.append(f"  Concerns: {'; '.join(rating.concerns)}")
+        if rating.evidence:
+            lines.append(f"  Evidence: {'; '.join(rating.evidence)}")
+
+    if report.priority_recommendations:
+        lines.append("")
+        lines.append("Priority recommendations")
+        for recommendation in report.priority_recommendations:
+            lines.append(f"- {recommendation}")
+
+    return "\n".join(lines)
+
+
+def _label_dimension(value: str) -> str:
+    labels = {
+        "cultivating_change_talk": "Cultivating change talk",
+        "softening_sustain_talk": "Softening sustain talk",
+        "partnership": "Partnership",
+        "empathy": "Empathy",
+        "autonomy_support": "Autonomy support",
+        "avoiding_unpermitted_advice": "Avoiding persuasion/advice without permission",
     }
-    print(json.dumps(data, indent=2))
+    return labels.get(value, value.replace("_", " ").capitalize())
 
 
 def main() -> int:
