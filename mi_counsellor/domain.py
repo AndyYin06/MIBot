@@ -27,6 +27,15 @@ class TalkType(str, Enum):
     NEUTRAL = "neutral"
 
 
+class MITIDimension(str, Enum):
+    CULTIVATING_CHANGE_TALK = "cultivating_change_talk"
+    SOFTENING_SUSTAIN_TALK = "softening_sustain_talk"
+    PARTNERSHIP = "partnership"
+    EMPATHY = "empathy"
+    AUTONOMY_SUPPORT = "autonomy_support"
+    AVOIDING_UNPERMITTED_ADVICE = "avoiding_unpermitted_advice"
+
+
 @dataclass(frozen=True)
 class SafetyAssessment:
     level: SafetyLevel
@@ -50,6 +59,24 @@ class ProcessAssessment:
     confidence: float
     rationale: str
     slow_down: bool = False
+
+
+@dataclass(frozen=True)
+class MITIDimensionRating:
+    dimension: MITIDimension
+    score: int
+    strengths: tuple[str, ...] = ()
+    concerns: tuple[str, ...] = ()
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MITIFidelityReport:
+    overall_score: float
+    adherent: bool
+    summary: str
+    dimension_ratings: tuple[MITIDimensionRating, ...]
+    priority_recommendations: tuple[str, ...] = ()
 
 
 @dataclass

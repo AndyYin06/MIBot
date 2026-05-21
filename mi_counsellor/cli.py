@@ -9,8 +9,9 @@ from mi_counsellor.classifiers import (
     SafetyScopeClassifier,
 )
 from mi_counsellor.counsellor import Counsellor, FallbackPolicy, Judge, MIEngine
-from mi_counsellor.domain import SessionState
+from mi_counsellor.domain import MITIFidelityReport, SessionState
 from mi_counsellor.llm import build_chat_model
+from mi_counsellor.miti import MITIFidelityValidator
 
 
 def build_engine() -> tuple[MIEngine, Counsellor]:
@@ -18,6 +19,11 @@ def build_engine() -> tuple[MIEngine, Counsellor]:
     judge_model = build_chat_model("MI_JUDGE_MODEL", "gpt-4o-mini")
     counsellor = Counsellor(counsellor_model)
     return MIEngine(counsellor, Judge(judge_model), FallbackPolicy()), counsellor
+
+
+def build_miti_validator() -> MITIFidelityValidator:
+    model = build_chat_model("MI_MITI_MODEL", "gpt-4o-mini")
+    return MITIFidelityValidator(model)
 
 
 def print_state(state: SessionState) -> None:
@@ -44,11 +50,32 @@ def print_state(state: SessionState) -> None:
     print(json.dumps(data, indent=2))
 
 
+def print_miti_report(report: MITIFidelityReport) -> None:
+    data = {
+        "overall_score": report.overall_score,
+        "adherent": report.adherent,
+        "summary": report.summary,
+        "dimension_ratings": [
+            {
+                "dimension": rating.dimension.value,
+                "score": rating.score,
+                "strengths": rating.strengths,
+                "concerns": rating.concerns,
+                "evidence": rating.evidence,
+            }
+            for rating in report.dimension_ratings
+        ],
+        "priority_recommendations": report.priority_recommendations,
+    }
+    print(json.dumps(data, indent=2))
+
+
 def main() -> int:
     safety_classifier = SafetyScopeClassifier()
     language_classifier = MotivationalLanguageClassifier()
     process_identifier = MIProcessStateIdentifier()
     engine, counsellor = build_engine()
+    miti_validator = build_miti_validator()
     state = SessionState()
 
     opening = counsellor.opening()
@@ -59,16 +86,22 @@ def main() -> int:
         try:
             user_text = input("\nYou: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\nCounsellor: Thanks for talking with me. Take care.")
+            print("\nCounsellor: Thanks for talking with me. Take care of yourself.")
             return 0
 
         if not user_text:
             continue
         if user_text.lower() in {"/quit", "quit", "exit", "/exit"}:
-            print("Counsellor: Thanks for talking with me. Take care.")
+            print("Counsellor: Thanks for talking with me. Take care of yourself.")
             return 0
         if user_text.lower() == "/state":
             print_state(state)
+            continue
+        if user_text.lower() == "/miti":
+            try:
+                print_miti_report(miti_validator.evaluate(state))
+            except Exception as exc:
+                print(f"[diagnostic] MITI validation failed: {exc}", file=sys.stderr)
             continue
 
         state.add_turn("user", user_text)
