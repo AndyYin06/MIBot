@@ -32,6 +32,13 @@ class MotivationDirection(str, Enum):
     AWAY_FROM_CHANGE = "away_from_change"
     MIXED = "mixed"
     NEUTRAL = "neutral"
+class MITIDimension(str, Enum):
+    CULTIVATING_CHANGE_TALK = "cultivating_change_talk"
+    SOFTENING_SUSTAIN_TALK = "softening_sustain_talk"
+    PARTNERSHIP = "partnership"
+    EMPATHY = "empathy"
+    AUTONOMY_SUPPORT = "autonomy_support"
+    AVOIDING_UNPERMITTED_ADVICE = "avoiding_unpermitted_advice"
 
 
 @dataclass(frozen=True)
@@ -68,6 +75,21 @@ class SessionDynamics:
     consecutive_discord_turns: int = 0
     stagnant: bool = False
     recommended_strategy: str = "reflect and ask one open question"
+class MITIDimensionRating:
+    dimension: MITIDimension
+    score: int
+    strengths: tuple[str, ...] = ()
+    concerns: tuple[str, ...] = ()
+    evidence: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MITIFidelityReport:
+    overall_score: float
+    adherent: bool
+    summary: str
+    dimension_ratings: tuple[MITIDimensionRating, ...]
+    priority_recommendations: tuple[str, ...] = ()
 
 
 @dataclass

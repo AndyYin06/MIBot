@@ -49,6 +49,61 @@ class DemoChatModel:
 
     def complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> str:
         joined = "\n".join(message["content"] for message in messages[-3:])
+        if "MITI-informed global coding lens" in joined:
+            return json.dumps(
+                {
+                    "overall_score": 4.0,
+                    "adherent": True,
+                    "summary": "The counsellor generally follows MI spirit by reflecting, asking open questions, and avoiding pressure.",
+                    "dimension_ratings": [
+                        {
+                            "dimension": "cultivating_change_talk",
+                            "score": 4,
+                            "strengths": ["Invites the user's own reasons and priorities."],
+                            "concerns": [],
+                            "evidence": ["Asks what feels important about smoking and change."],
+                        },
+                        {
+                            "dimension": "softening_sustain_talk",
+                            "score": 4,
+                            "strengths": ["Acknowledges reasons for smoking without debating them."],
+                            "concerns": [],
+                            "evidence": ["Reflects that smoking serves a real purpose."],
+                        },
+                        {
+                            "dimension": "partnership",
+                            "score": 4,
+                            "strengths": ["Uses collaborative language and asks permission before planning."],
+                            "concerns": [],
+                            "evidence": ["Offers to talk through options only if that is okay."],
+                        },
+                        {
+                            "dimension": "empathy",
+                            "score": 4,
+                            "strengths": ["Uses warm reflections of the user's experience."],
+                            "concerns": [],
+                            "evidence": ["Names stress, ambivalence, or choice when present."],
+                        },
+                        {
+                            "dimension": "autonomy_support",
+                            "score": 4,
+                            "strengths": ["Emphasizes that change remains the user's choice."],
+                            "concerns": [],
+                            "evidence": ["Avoids pushing for a quit plan before readiness."],
+                        },
+                        {
+                            "dimension": "avoiding_unpermitted_advice",
+                            "score": 4,
+                            "strengths": ["Avoids directives and medical specifics."],
+                            "concerns": [],
+                            "evidence": ["Refers medical details to qualified support."],
+                        },
+                    ],
+                    "priority_recommendations": [
+                        "Keep grounding feedback in specific counsellor turns when using a live evaluator."
+                    ],
+                }
+            )
         if '"safe"' in joined and '"mi_consistent"' in joined:
             return json.dumps(
                 {

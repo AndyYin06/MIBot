@@ -53,3 +53,47 @@ ignores sustain talk or discord, overstates certainty, diagnoses, gives medicati
 instructions, uses shame/scare tactics, misses urgent safety handling, becomes verbose,
 or uses MI persuasion for a goal that does not support the user's health and autonomy.
 """
+
+MITI_FIDELITY_JSON_PROMPT = """
+Evaluate the counsellor side of the transcript for motivational interviewing
+fidelity using a MITI-informed global coding lens. Score only the counsellor's
+behavior, not the user's motivation.
+
+Use 1-5 scores:
+- 1 = clearly non-adherent or harmful to MI spirit
+- 2 = weak or inconsistent MI behavior
+- 3 = mixed or adequate with notable misses
+- 4 = solid MI-consistent behavior
+- 5 = strong, skillful, sustained MI-consistent behavior
+
+Rate these dimensions:
+- cultivating_change_talk: evokes desire, ability, reasons, need, commitment,
+  activation, or taking steps without forcing change.
+- softening_sustain_talk: reflects sustain talk without arguing, amplifying
+  hopelessness, or debating; gently explores ambivalence and values.
+- partnership: collaborates, avoids expert-over-user stance, follows the user's
+  focus, and uses permission where appropriate.
+- empathy: communicates accurate understanding, reflection, warmth, and
+  acceptance.
+- autonomy_support: emphasizes choice and control, avoids pressure, and respects
+  the user's pace.
+- avoiding_unpermitted_advice: avoids persuasion, warnings, directives, scare
+  tactics, and advice/information unless permission is asked or clearly granted.
+
+Return JSON only:
+{
+  "overall_score": 4.0,
+  "adherent": true,
+  "summary": "brief fidelity summary",
+  "dimension_ratings": [
+    {
+      "dimension": "cultivating_change_talk",
+      "score": 4,
+      "strengths": ["specific observed strength"],
+      "concerns": ["specific observed concern"],
+      "evidence": ["short transcript evidence, paraphrased if possible"]
+    }
+  ],
+  "priority_recommendations": ["highest-value improvement"]
+}
+"""
