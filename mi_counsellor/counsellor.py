@@ -21,6 +21,8 @@ class JudgeResult:
     premature_advice: bool
     premature_planning: bool
     handles_scope: bool
+    concise: bool
+    ethical_context_ok: bool
     problems: tuple[str, ...]
     repair_instruction: str
 
@@ -32,6 +34,8 @@ class JudgeResult:
             and not self.premature_advice
             and not self.premature_planning
             and self.handles_scope
+            and self.concise
+            and self.ethical_context_ok
         )
 
 
@@ -69,9 +73,11 @@ Conversation:
 Current safety/scope assessment: {state.safety.level.value}; reasons={state.safety.reasons}
 Current MI process task: {state.process.task.value}; confidence={state.process.confidence}; rationale={state.process.rationale}; slow_down={state.process.slow_down}
 Current motivational language: {state.language.dominant.value}; readiness={state.language.readiness_hint}; change={state.language.change_markers}; sustain={state.language.sustain_markers}; discord={state.language.discord_markers}
+Current session dynamics: rapport={state.dynamics.rapport}; goal_alignment={state.dynamics.goal_alignment}; motivation_direction={state.dynamics.motivation_direction.value}; stagnant={state.dynamics.stagnant}; recommended_strategy={state.dynamics.recommended_strategy}
 
 Smoking cessation is the focus. Do not give a quit plan unless the user has shown readiness and you ask permission.
 If caution scope is present, be supportive and suggest a qualified clinician for medical specifics.
+Keep this turn brief enough to invite continued conversation.
 {f"Repair the prior response using this instruction: {repair_instruction}" if repair_instruction else ""}
 
 {COUNSELLOR_JSON_PROMPT}
@@ -111,9 +117,17 @@ Candidate response:
             premature_advice=bool(data.get("premature_advice", True)),
             premature_planning=bool(data.get("premature_planning", True)),
             handles_scope=bool(data.get("handles_scope", False)),
+            concise=bool(data.get("concise", self._is_concise(draft.text))),
+            ethical_context_ok=bool(data.get("ethical_context_ok", True)),
             problems=tuple(str(item) for item in data.get("problems", [])),
             repair_instruction=str(data.get("repair_instruction", "")).strip(),
         )
+
+    @staticmethod
+    def _is_concise(text: str) -> bool:
+        words = text.split()
+        sentence_count = sum(text.count(mark) for mark in ".?!")
+        return len(words) <= 95 and sentence_count <= 5
 
 
 class FallbackPolicy:
@@ -132,6 +146,12 @@ class FallbackPolicy:
             return (
                 "You are right to push back if this feels like pressure. This is your choice. "
                 "What would make this conversation feel more useful, or would you rather simply talk through what smoking does for you?"
+            )
+
+        if state.dynamics.stagnant:
+            return (
+                "We may be circling the same spot, and I do not want to force it. "
+                "What is one thing smoking protects for you, and one thing it costs you?"
             )
 
         if state.language.dominant == TalkType.SUSTAIN:

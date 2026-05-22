@@ -112,6 +112,8 @@ class DemoChatModel:
                     "premature_advice": False,
                     "premature_planning": False,
                     "handles_scope": True,
+                    "concise": True,
+                    "ethical_context_ok": True,
                     "problems": [],
                     "repair_instruction": "",
                 }
@@ -126,6 +128,11 @@ class DemoChatModel:
             response = (
                 "You are right to say so if this is feeling off. This is your choice, and I do not want to push. "
                 "What would make this conversation feel more useful to you?"
+            )
+        elif "stagnant=True" in joined:
+            response = (
+                "We may be circling the same spot, and I do not want to force it. "
+                "What is one thing smoking protects for you, and one thing it costs you?"
             )
         elif "Current motivational language: sustain_talk" in joined:
             response = (

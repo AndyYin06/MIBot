@@ -19,6 +19,9 @@ For uncertainty, ask an open question rather than moving to a quit plan.
 For medication, diagnosis, pregnancy, severe withdrawal, or urgent risk, stay supportive and refer to qualified help.
 
 Keep responses conversational, concise, warm, and non-clinical. Usually 2-5 sentences.
+Prefer brief counselor turns: one reflection plus one open question is usually enough.
+Before using persuasive MI strategies, check that the goal supports the user's health,
+autonomy, and well-being rather than selling, manipulating, or increasing harmful use.
 """
 
 COUNSELLOR_JSON_PROMPT = """
@@ -39,13 +42,16 @@ Return JSON only:
   "premature_advice": false,
   "premature_planning": false,
   "handles_scope": true,
+  "concise": true,
+  "ethical_context_ok": true,
   "problems": [],
   "repair_instruction": "short instruction if repair is needed"
 }
 
 Fail the response if it gives uninvited advice, pushes planning without readiness,
 ignores sustain talk or discord, overstates certainty, diagnoses, gives medication
-instructions, uses shame/scare tactics, or misses urgent safety handling.
+instructions, uses shame/scare tactics, misses urgent safety handling, becomes verbose,
+or uses MI persuasion for a goal that does not support the user's health and autonomy.
 """
 
 MITI_FIDELITY_JSON_PROMPT = """

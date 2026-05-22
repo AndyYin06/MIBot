@@ -27,6 +27,11 @@ class TalkType(str, Enum):
     NEUTRAL = "neutral"
 
 
+class MotivationDirection(str, Enum):
+    TOWARD_CHANGE = "toward_change"
+    AWAY_FROM_CHANGE = "away_from_change"
+    MIXED = "mixed"
+    NEUTRAL = "neutral"
 class MITIDimension(str, Enum):
     CULTIVATING_CHANGE_TALK = "cultivating_change_talk"
     SOFTENING_SUSTAIN_TALK = "softening_sustain_talk"
@@ -62,6 +67,14 @@ class ProcessAssessment:
 
 
 @dataclass(frozen=True)
+class SessionDynamics:
+    rapport: Literal["strong", "steady", "strained"] = "steady"
+    goal_alignment: Literal["aligned", "unclear", "misaligned"] = "unclear"
+    motivation_direction: MotivationDirection = MotivationDirection.NEUTRAL
+    consecutive_sustain_turns: int = 0
+    consecutive_discord_turns: int = 0
+    stagnant: bool = False
+    recommended_strategy: str = "reflect and ask one open question"
 class MITIDimensionRating:
     dimension: MITIDimension
     score: int
@@ -93,6 +106,7 @@ class SessionState:
     process: ProcessAssessment = field(
         default_factory=lambda: ProcessAssessment(MITask.ENGAGING, 0.6, "Opening contact.")
     )
+    dynamics: SessionDynamics = field(default_factory=SessionDynamics)
 
     def add_turn(self, speaker: Literal["user", "counsellor"], text: str) -> None:
         self.turns.append(ConversationTurn(speaker=speaker, text=text.strip()))

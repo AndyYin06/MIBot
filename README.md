@@ -6,6 +6,7 @@ The implementation is intentionally modular:
 
 - `SafetyScopeClassifier` detects crisis, medical, age/legal, and out-of-scope content.
 - `MotivationalLanguageClassifier` tracks change talk, sustain talk, ambivalence, discord, and confidence signals.
+- `SessionDynamicsAnalyzer` tracks multi-turn rapport, goal alignment, motivational direction, and stagnation.
 - `MIProcessStateIdentifier` estimates the current MI task from conversation evidence rather than pushing a linear stage progression.
 - `Counsellor` drafts the next MI-consistent response.
 - `Judge` validates safety and MI fidelity before anything is shown to the user.
@@ -38,7 +39,7 @@ export OPENAI_BASE_URL=https://api.openai.com/v1
 
 ## Commands
 
-- `/state` prints the internal motivational and process state.
+- `/state` prints the internal motivational and process state as well as session dynamics used for pacing and strategy selection.
 - `/miti` prints a transcript-level MI fidelity report with 1-5 scores for cultivating change talk, softening sustain talk, partnership, empathy, autonomy support, and avoiding persuasion/advice without permission.
 - `/quit` exits.
 
