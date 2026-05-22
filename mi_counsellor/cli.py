@@ -6,6 +6,7 @@ import sys
 from mi_counsellor.classifiers import (
     MIProcessStateIdentifier,
     MotivationalLanguageClassifier,
+    SessionDynamicsAnalyzer,
     SafetyScopeClassifier,
 )
 from mi_counsellor.counsellor import Counsellor, FallbackPolicy, Judge, MIEngine
@@ -40,6 +41,15 @@ def print_state(state: SessionState) -> None:
             "readiness_hint": state.language.readiness_hint,
             "confidence": state.language.confidence,
         },
+        "session_dynamics": {
+            "rapport": state.dynamics.rapport,
+            "goal_alignment": state.dynamics.goal_alignment,
+            "motivation_direction": state.dynamics.motivation_direction.value,
+            "consecutive_sustain_turns": state.dynamics.consecutive_sustain_turns,
+            "consecutive_discord_turns": state.dynamics.consecutive_discord_turns,
+            "stagnant": state.dynamics.stagnant,
+            "recommended_strategy": state.dynamics.recommended_strategy,
+        },
     }
     print(json.dumps(data, indent=2))
 
@@ -47,6 +57,7 @@ def print_state(state: SessionState) -> None:
 def main() -> int:
     safety_classifier = SafetyScopeClassifier()
     language_classifier = MotivationalLanguageClassifier()
+    dynamics_analyzer = SessionDynamicsAnalyzer()
     process_identifier = MIProcessStateIdentifier()
     engine, counsellor = build_engine()
     state = SessionState()
@@ -74,6 +85,7 @@ def main() -> int:
         state.add_turn("user", user_text)
         state.safety = safety_classifier.classify(user_text)
         state.language = language_classifier.classify(user_text)
+        state.dynamics = dynamics_analyzer.update(state)
         state.process = process_identifier.identify(state)
 
         try:

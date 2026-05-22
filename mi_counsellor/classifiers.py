@@ -5,9 +5,11 @@ import re
 from mi_counsellor.domain import (
     LanguageAssessment,
     MITask,
+    MotivationDirection,
     ProcessAssessment,
     SafetyAssessment,
     SafetyLevel,
+    SessionDynamics,
     SessionState,
     TalkType,
 )
@@ -28,6 +30,10 @@ class SafetyScopeClassifier:
     _out_of_scope_patterns = (
         r"\b(homework|tax|legal advice|invest|portfolio|code|programming)\b",
     )
+    _persuasive_misuse_patterns = (
+        r"\b(sell|sales|marketing|advertis(e|ing)|convince|persuade|manipulate)\b.*\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b",
+        r"\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b.*\b(sell|sales|marketing|advertis(e|ing)|convince|persuade|manipulate)\b",
+    )
 
     def classify(self, text: str) -> SafetyAssessment:
         lower = text.lower()
@@ -38,6 +44,13 @@ class SafetyScopeClassifier:
                 "I am really glad you said that. Your safety matters more than quitting smoking right now. "
                 "If you might hurt yourself or someone else, please call emergency services now, or call/text 988 "
                 "in the U.S. or Canada for immediate crisis support. Is there someone nearby you can be with while you get support?",
+            )
+        if self._matches(lower, self._persuasive_misuse_patterns):
+            return SafetyAssessment(
+                SafetyLevel.OUT_OF_SCOPE,
+                ("persuasive_misuse_risk",),
+                "I cannot help use motivational interviewing to sell, promote, or pressure people toward harmful products. "
+                "I can help with smoking cessation support, reducing nicotine harm, or a non-manipulative health conversation.",
             )
         if self._matches(lower, self._medical_patterns):
             return SafetyAssessment(
@@ -91,12 +104,16 @@ class MotivationalLanguageClassifier:
         else:
             dominant = TalkType.NEUTRAL
 
+        high_readiness = self._find(lower, self.high_readiness_patterns)
+        low_readiness = self._find(lower, self.low_readiness_patterns)
         readiness = "unknown"
-        if self._find(lower, self.high_readiness_patterns):
+        if low_readiness:
+            readiness = "low"
+        elif high_readiness:
             readiness = "high"
         elif change and sustain:
             readiness = "mixed"
-        elif self._find(lower, self.low_readiness_patterns) or sustain:
+        elif sustain:
             readiness = "low"
 
         evidence_count = len(change) + len(sustain) + len(discord)
@@ -125,6 +142,7 @@ class MIProcessStateIdentifier:
 
     def identify(self, state: SessionState) -> ProcessAssessment:
         language = state.language
+        dynamics = state.dynamics
         turn_count = state.user_turn_count()
 
         if turn_count <= 1:
@@ -132,6 +150,22 @@ class MIProcessStateIdentifier:
 
         if language.dominant == TalkType.DISCORD:
             return ProcessAssessment(MITask.ENGAGING, 0.85, "Discord is present; repair engagement before moving on.", True)
+
+        if dynamics.rapport == "strained" or dynamics.goal_alignment == "misaligned":
+            return ProcessAssessment(
+                MITask.ENGAGING,
+                0.78,
+                "Relational strain or goal misalignment is present; rebuild partnership before evoking change.",
+                True,
+            )
+
+        if dynamics.stagnant:
+            return ProcessAssessment(
+                MITask.EVOKING,
+                0.72,
+                "Motivational direction has stalled; change strategy and evoke values or exceptions.",
+                True,
+            )
 
         if language.dominant in {TalkType.SUSTAIN, TalkType.AMBIVALENCE}:
             return ProcessAssessment(
@@ -152,3 +186,94 @@ class MIProcessStateIdentifier:
             return ProcessAssessment(MITask.FOCUSING, 0.6, "Topic needs gentle focusing around smoking cessation.")
 
         return ProcessAssessment(MITask.EVOKING, 0.55, "Some change language is present; evoke before planning.")
+
+
+class SessionDynamicsAnalyzer:
+    """Tracks long-horizon conversational signals without replacing turn classifiers."""
+
+    def update(self, state: SessionState) -> SessionDynamics:
+        previous = state.dynamics
+        language = state.language
+        text = self._latest_user_text(state).lower()
+
+        consecutive_sustain = self._next_count(
+            previous.consecutive_sustain_turns,
+            language.dominant in {TalkType.SUSTAIN, TalkType.AMBIVALENCE},
+        )
+        consecutive_discord = self._next_count(previous.consecutive_discord_turns, language.dominant == TalkType.DISCORD)
+
+        if language.dominant == TalkType.DISCORD or consecutive_discord:
+            rapport = "strained"
+        elif language.dominant == TalkType.CHANGE and previous.rapport != "strained":
+            rapport = "strong"
+        else:
+            rapport = "steady"
+
+        if language.dominant == TalkType.DISCORD or self._mentions_bad_fit(text):
+            goal_alignment = "misaligned"
+        elif self._mentions_smoking_or_change(text):
+            goal_alignment = "aligned"
+        else:
+            goal_alignment = previous.goal_alignment if state.user_turn_count() > 1 else "unclear"
+
+        motivation_direction = self._direction_for(language)
+        stagnant = consecutive_sustain >= 2 or consecutive_discord >= 2
+        strategy = self._strategy_for(rapport, goal_alignment, motivation_direction, stagnant)
+
+        return SessionDynamics(
+            rapport=rapport,
+            goal_alignment=goal_alignment,
+            motivation_direction=motivation_direction,
+            consecutive_sustain_turns=consecutive_sustain,
+            consecutive_discord_turns=consecutive_discord,
+            stagnant=stagnant,
+            recommended_strategy=strategy,
+        )
+
+    @staticmethod
+    def _latest_user_text(state: SessionState) -> str:
+        for turn in reversed(state.turns):
+            if turn.speaker == "user":
+                return turn.text
+        return ""
+
+    @staticmethod
+    def _next_count(previous: int, active: bool) -> int:
+        return previous + 1 if active else 0
+
+    @staticmethod
+    def _direction_for(language: LanguageAssessment) -> MotivationDirection:
+        if language.dominant == TalkType.CHANGE:
+            return MotivationDirection.TOWARD_CHANGE
+        if language.dominant == TalkType.SUSTAIN:
+            return MotivationDirection.AWAY_FROM_CHANGE
+        if language.dominant == TalkType.AMBIVALENCE:
+            return MotivationDirection.MIXED
+        return MotivationDirection.NEUTRAL
+
+    @staticmethod
+    def _mentions_smoking_or_change(text: str) -> bool:
+        return bool(re.search(r"\b(smok(e|ing)|cigarette|tobacco|nicotine|quit|stop|cut down|change)\b", text))
+
+    @staticmethod
+    def _mentions_bad_fit(text: str) -> bool:
+        return bool(re.search(r"\b(not helpful|pointless|wrong topic|not what i asked|you don't understand)\b", text))
+
+    @staticmethod
+    def _strategy_for(
+        rapport: str,
+        goal_alignment: str,
+        direction: MotivationDirection,
+        stagnant: bool,
+    ) -> str:
+        if rapport == "strained" or goal_alignment == "misaligned":
+            return "repair rapport, affirm autonomy, and ask what would make the conversation useful"
+        if stagnant:
+            return "change strategy with a double-sided reflection and evoke values or exceptions"
+        if direction == MotivationDirection.TOWARD_CHANGE:
+            return "reinforce change talk with a complex reflection before asking permission to plan"
+        if direction == MotivationDirection.AWAY_FROM_CHANGE:
+            return "reflect sustain talk accurately and invite the other side without arguing"
+        if direction == MotivationDirection.MIXED:
+            return "use a double-sided reflection and ask which side feels stronger"
+        return "reflect and ask one open question"

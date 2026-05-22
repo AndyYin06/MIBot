@@ -27,6 +27,13 @@ class TalkType(str, Enum):
     NEUTRAL = "neutral"
 
 
+class MotivationDirection(str, Enum):
+    TOWARD_CHANGE = "toward_change"
+    AWAY_FROM_CHANGE = "away_from_change"
+    MIXED = "mixed"
+    NEUTRAL = "neutral"
+
+
 @dataclass(frozen=True)
 class SafetyAssessment:
     level: SafetyLevel
@@ -52,6 +59,17 @@ class ProcessAssessment:
     slow_down: bool = False
 
 
+@dataclass(frozen=True)
+class SessionDynamics:
+    rapport: Literal["strong", "steady", "strained"] = "steady"
+    goal_alignment: Literal["aligned", "unclear", "misaligned"] = "unclear"
+    motivation_direction: MotivationDirection = MotivationDirection.NEUTRAL
+    consecutive_sustain_turns: int = 0
+    consecutive_discord_turns: int = 0
+    stagnant: bool = False
+    recommended_strategy: str = "reflect and ask one open question"
+
+
 @dataclass
 class ConversationTurn:
     speaker: Literal["user", "counsellor"]
@@ -66,6 +84,7 @@ class SessionState:
     process: ProcessAssessment = field(
         default_factory=lambda: ProcessAssessment(MITask.ENGAGING, 0.6, "Opening contact.")
     )
+    dynamics: SessionDynamics = field(default_factory=SessionDynamics)
 
     def add_turn(self, speaker: Literal["user", "counsellor"], text: str) -> None:
         self.turns.append(ConversationTurn(speaker=speaker, text=text.strip()))
