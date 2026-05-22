@@ -41,7 +41,7 @@ class SafetyScopeClassifier:
             return SafetyAssessment(
                 SafetyLevel.URGENT,
                 ("urgent_risk",),
-                "I am really glad you said that. Your safety matters more than quitting smoking right now. "
+                "Thank you for telling me. Your safety matters more than quitting smoking right now. "
                 "If you might hurt yourself or someone else, please call emergency services now, or call/text 988 "
                 "in the U.S. or Canada for immediate crisis support. Is there someone nearby you can be with while you get support?",
             )

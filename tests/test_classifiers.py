@@ -11,6 +11,8 @@ def test_detects_urgent_safety_language() -> None:
     result = SafetyScopeClassifier().classify("I feel suicidal and I might hurt myself")
     assert result.level == SafetyLevel.URGENT
     assert result.suggested_response
+    assert "Thank you for telling me" in result.suggested_response
+    assert "glad" not in result.suggested_response.lower()
 
 
 def test_detects_ambivalence() -> None:

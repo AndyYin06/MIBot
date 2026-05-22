@@ -32,6 +32,8 @@ class MotivationDirection(str, Enum):
     AWAY_FROM_CHANGE = "away_from_change"
     MIXED = "mixed"
     NEUTRAL = "neutral"
+
+
 class MITIDimension(str, Enum):
     CULTIVATING_CHANGE_TALK = "cultivating_change_talk"
     SOFTENING_SUSTAIN_TALK = "softening_sustain_talk"
@@ -75,6 +77,9 @@ class SessionDynamics:
     consecutive_discord_turns: int = 0
     stagnant: bool = False
     recommended_strategy: str = "reflect and ask one open question"
+
+
+@dataclass(frozen=True)
 class MITIDimensionRating:
     dimension: MITIDimension
     score: int
