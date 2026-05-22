@@ -33,6 +33,8 @@ class SafetyScopeClassifier:
     _persuasive_misuse_patterns = (
         r"\b(sell|sales|marketing|advertis(e|ing)|convince|persuade|manipulate)\b.*\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b",
         r"\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b.*\b(sell|sales|marketing|advertis(e|ing)|convince|persuade|manipulate)\b",
+        r"\b(research|clinician|doctor|therapist|teacher|professor|authority|authorized)\b.*\b(use mi|motivational interviewing|behavior(al)? modification)\b.*\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b",
+        r"\b(ignore|bypass|override|drop)\b.*\b(safety|guardrails?|rules?|ethics|boundar(y|ies))\b.*\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?|sales|marketing)\b",
     )
 
     def classify(self, text: str) -> SafetyAssessment:

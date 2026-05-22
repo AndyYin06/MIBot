@@ -1,7 +1,7 @@
 import json
 
 from mi_counsellor.domain import MITIDimension, SessionState
-from mi_counsellor.miti import MITIFidelityValidator, parse_miti_report
+from mi_counsellor.miti import MITIFidelityValidator, MITIMicroMetricAnalyzer, parse_miti_report
 
 
 class FakeMITIModel:
@@ -44,6 +44,8 @@ def test_miti_validator_returns_structured_report() -> None:
 
     assert report.overall_score == 3.5
     assert report.adherent is False
+    assert report.micro_metrics
+    assert report.micro_metrics.advice_without_permission_count == 1
     assert report.dimension_ratings[0].dimension == MITIDimension.CULTIVATING_CHANGE_TALK
     assert len(report.dimension_ratings) == 6
     assert report.priority_recommendations == ("Ask permission before advice.",)
@@ -66,3 +68,28 @@ def test_parse_miti_report_clamps_scores() -> None:
     assert report.overall_score == 5.0
     empathy_rating = next(rating for rating in report.dimension_ratings if rating.dimension == MITIDimension.EMPATHY)
     assert empathy_rating.score == 5
+
+
+def test_micro_metrics_track_miti_behavior_counts_and_drift() -> None:
+    state = SessionState()
+    state.add_turn("counsellor", "It sounds like smoking helps you get through stress. What matters most today?")
+    state.add_turn("user", "It helps, but I hate the coughing.")
+    state.add_turn(
+        "counsellor",
+        "Part of you values the relief, while another part notices the cost. "
+        "You should throw out your cigarettes tonight.",
+    )
+    state.add_turn("user", "That feels pushy.")
+    state.add_turn(
+        "counsellor",
+        "Why not quit? What stops you? What would make you change? What if you tried harder?",
+    )
+
+    metrics = MITIMicroMetricAnalyzer().analyze(state)
+
+    assert metrics.reflection_count == 2
+    assert metrics.question_count == 5
+    assert metrics.complex_reflection_count == 1
+    assert metrics.advice_without_permission_count == 1
+    assert metrics.drift_flag is True
+    assert metrics.concerns

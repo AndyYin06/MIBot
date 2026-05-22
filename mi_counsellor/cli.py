@@ -85,6 +85,21 @@ def format_miti_report(report: MITIFidelityReport) -> str:
         if rating.evidence:
             lines.append(f"  Evidence: {'; '.join(rating.evidence)}")
 
+    if report.micro_metrics:
+        metrics = report.micro_metrics
+        ratio = "n/a" if metrics.reflection_to_question_ratio is None else f"{metrics.reflection_to_question_ratio:.2f}"
+        lines.append("")
+        lines.append("Local validation metrics")
+        lines.append(f"- Reflections/questions: {metrics.reflection_count}/{metrics.question_count} (R:Q {ratio})")
+        lines.append(
+            f"- Complex reflections: {metrics.complex_reflection_count} ({metrics.complex_reflection_percent:.1f}%)"
+        )
+        lines.append(f"- Average counsellor turn length: {metrics.average_counsellor_words:.1f} words")
+        lines.append(f"- Advice without nearby permission: {metrics.advice_without_permission_count}")
+        lines.append(f"- Drift flag: {'yes' if metrics.drift_flag else 'no'}")
+        if metrics.concerns:
+            lines.append(f"  Concerns: {'; '.join(metrics.concerns)}")
+
     if report.priority_recommendations:
         lines.append("")
         lines.append("Priority recommendations")

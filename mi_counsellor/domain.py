@@ -89,12 +89,26 @@ class MITIDimensionRating:
 
 
 @dataclass(frozen=True)
+class MITIMicroMetrics:
+    reflection_count: int = 0
+    question_count: int = 0
+    reflection_to_question_ratio: float | None = None
+    complex_reflection_count: int = 0
+    complex_reflection_percent: float = 0.0
+    average_counsellor_words: float = 0.0
+    advice_without_permission_count: int = 0
+    drift_flag: bool = False
+    concerns: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class MITIFidelityReport:
     overall_score: float
     adherent: bool
     summary: str
     dimension_ratings: tuple[MITIDimensionRating, ...]
     priority_recommendations: tuple[str, ...] = ()
+    micro_metrics: MITIMicroMetrics | None = None
 
 
 @dataclass

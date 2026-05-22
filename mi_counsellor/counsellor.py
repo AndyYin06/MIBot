@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from mi_counsellor.domain import SafetyLevel, SessionState, TalkType
+from mi_counsellor.domain import ConversationTurn, SafetyLevel, SessionState, TalkType
 from mi_counsellor.llm import ChatModel, parse_json_object
+from mi_counsellor.miti import MITIMicroMetricAnalyzer
 from mi_counsellor.prompts import COUNSELLOR_JSON_PROMPT, JUDGE_JSON_PROMPT, MI_STYLE_GUIDE
 
 
@@ -89,6 +90,7 @@ class Judge:
         self.model = model
 
     def evaluate(self, state: SessionState, draft: DraftResponse) -> JudgeResult:
+        local_problems = self._local_validation_problems(state, draft)
         raw = self.model.complete(
             [
                 {"role": "system", "content": MI_STYLE_GUIDE + "\n" + JUDGE_JSON_PROMPT},
@@ -111,16 +113,20 @@ Candidate response:
             temperature=0.0,
         )
         data = parse_json_object(raw)
+        model_problems = tuple(str(item) for item in data.get("problems", []))
+        problems = model_problems + local_problems
         return JudgeResult(
-            safe=bool(data.get("safe", False)),
+            safe=bool(data.get("safe", False)) and not any("crisis protocol" in item for item in local_problems),
             mi_consistent=bool(data.get("mi_consistent", False)),
-            premature_advice=bool(data.get("premature_advice", True)),
+            premature_advice=bool(data.get("premature_advice", True))
+            or any("permission" in item for item in local_problems),
             premature_planning=bool(data.get("premature_planning", True)),
             handles_scope=bool(data.get("handles_scope", False)),
-            concise=bool(data.get("concise", self._is_concise(draft.text))),
+            concise=bool(data.get("concise", self._is_concise(draft.text)))
+            and not any("verbose" in item or "drift" in item for item in local_problems),
             ethical_context_ok=bool(data.get("ethical_context_ok", True)),
-            problems=tuple(str(item) for item in data.get("problems", [])),
-            repair_instruction=str(data.get("repair_instruction", "")).strip(),
+            problems=problems,
+            repair_instruction=self._repair_instruction(str(data.get("repair_instruction", "")).strip(), local_problems),
         )
 
     @staticmethod
@@ -128,6 +134,64 @@ Candidate response:
         words = text.split()
         sentence_count = sum(text.count(mark) for mark in ".?!")
         return len(words) <= 95 and sentence_count <= 5
+
+    def _local_validation_problems(self, state: SessionState, draft: DraftResponse) -> tuple[str, ...]:
+        if state.safety.level == SafetyLevel.URGENT:
+            crisis = CrisisProtocolValidator().missing_behaviors(draft.text)
+            if crisis:
+                return (f"crisis protocol missing: {', '.join(crisis)}",)
+
+        transcript = list(state.turns)
+        transcript.append(ConversationTurn(speaker="counsellor", text=draft.text))
+        analyzer = MITIMicroMetricAnalyzer()
+        metrics = analyzer.analyze(transcript)
+        problems: list[str] = []
+        if self._draft_has_unpermitted_advice(state, draft, analyzer):
+            problems.append("advice or direction appears without nearby permission")
+        if len(draft.text.split()) > 95:
+            problems.append("response is verbose for a single MI turn")
+        if metrics.drift_flag and state.user_turn_count() >= 3:
+            problems.append("local metrics suggest possible drift toward questions or verbosity")
+        return tuple(problems)
+
+    @staticmethod
+    def _draft_has_unpermitted_advice(
+        state: SessionState,
+        draft: DraftResponse,
+        analyzer: MITIMicroMetricAnalyzer,
+    ) -> bool:
+        if not analyzer._has_marker(draft.text, analyzer._advice_markers):
+            return False
+        context = " ".join(turn.text.lower() for turn in state.turns[-4:])
+        return not analyzer._has_marker(context, analyzer._permission_markers)
+
+    @staticmethod
+    def _repair_instruction(model_instruction: str, local_problems: tuple[str, ...]) -> str:
+        instructions = [model_instruction] if model_instruction else []
+        if local_problems:
+            instructions.append("; ".join(local_problems))
+            instructions.append("Use one concise reflection plus one open question, and ask permission before advice.")
+        return " ".join(instructions).strip()
+
+
+class CrisisProtocolValidator:
+    """Checks crisis replies for the five safety behaviors highlighted in validation research."""
+
+    _checks = {
+        "risk_acknowledgment": ("safety", "hurt yourself", "hurt someone", "risk", "emergency"),
+        "empathy": ("thank you", "sorry", "sounds", "matters", "care"),
+        "help_seeking": ("call", "text", "emergency services", "someone nearby", "clinician"),
+        "specific_resources": ("988", "emergency services", "crisis"),
+        "continued_engagement": ("is there", "can you", "would you", "while you", "nearby"),
+    }
+
+    def missing_behaviors(self, text: str) -> tuple[str, ...]:
+        lower = text.lower()
+        return tuple(name for name, markers in self._checks.items() if not any(marker in lower for marker in markers))
+
+    def passes(self, text: str) -> bool:
+        return not self.missing_behaviors(text)
+
 
 
 class FallbackPolicy:
