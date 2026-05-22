@@ -1,50 +1,101 @@
 # MI Smoking Cessation Counsellor
 
-A CLI motivational interviewing counsellor for smoking cessation. The counsellor speaks first, then alternates turns with the user.
+A command-line motivational interviewing (MI) counsellor prototype for smoking cessation. The app starts the conversation, alternates turns with the user, tracks motivational and safety state, and checks each generated response before it reaches the CLI.
 
-The implementation is intentionally modular:
+The default runtime is deterministic and local, so the project works without network access or API keys. An OpenAI-compatible chat completion endpoint can be enabled for live model-backed counselling, judging, and MITI-style transcript review.
 
-- `SafetyScopeClassifier` detects crisis, medical, age/legal, and out-of-scope content.
-- `MotivationalLanguageClassifier` tracks change talk, sustain talk, ambivalence, discord, and confidence signals.
-- `SessionDynamicsAnalyzer` tracks multi-turn rapport, goal alignment, motivational direction, and stagnation.
-- `MIProcessStateIdentifier` estimates the current MI task from conversation evidence rather than pushing a linear stage progression.
-- `Counsellor` drafts the next MI-consistent response.
-- `Judge` validates safety and MI fidelity before anything is shown to the user.
-- `MITIFidelityValidator` evaluates the full transcript with a MITI-informed fidelity rubric.
-- `FallbackPolicy` repairs or replaces responses that are unsafe, too directive, premature, or outside scope.
+## What It Does
+
+- Runs an interactive smoking cessation counselling session in the terminal.
+- Classifies each user turn for urgent risk, medical scope, out-of-scope topics, and persuasive misuse.
+- Tracks change talk, sustain talk, ambivalence, discord, readiness hints, rapport, goal alignment, and stagnation.
+- Estimates the active MI task as engaging, focusing, evoking, or planning without forcing a linear stage progression.
+- Drafts concise MI-consistent responses and validates them before display.
+- Falls back to conservative scripted responses when safety, scope, or MI fidelity checks fail.
+- Provides `/state` diagnostics and `/miti` transcript-level fidelity reporting.
+
+## Repository Layout
+
+```text
+mi_counsellor/
+  cli.py          CLI loop, commands, engine construction, report formatting
+  classifiers.py  Safety/scope, motivational language, process, and dynamics analyzers
+  counsellor.py   Drafting, judge validation, crisis validation, fallback policy, engine
+  domain.py       Dataclasses and enums for session state and MITI reports
+  llm.py          Demo model, OpenAI-compatible model adapter, JSON parsing
+  miti.py         MITI-informed evaluator and local micro-metric analyzer
+  prompts.py      MI style guide and JSON prompt contracts
+tests/            Unit tests for classifiers, CLI formatting, judge behavior, and MITI metrics
+docs/             Design notes and validation feature notes
+tools/            Utility script for extracting non-verbatim source notes from an MI PDF
+```
+
+## Install
+
+This project requires Python 3.11 or newer. With `uv`:
+
+```bash
+uv sync
+```
+
+The only runtime dependency is `pypdf`, used by the source-note extraction tool. Tests use `pytest` from the development dependency group.
 
 ## Run
 
+Local deterministic demo mode:
+
 ```bash
-python3 -m mi_counsellor
+uv run python -m mi_counsellor
 ```
 
-By default the app runs in a deterministic local demo mode so the CLI works without network access or API keys.
+The package also defines a console script:
 
-To use an OpenAI-compatible chat completion endpoint:
+```bash
+uv run mi-counsellor
+```
+
+OpenAI-compatible mode:
 
 ```bash
 export MI_LLM_PROVIDER=openai-compatible
 export OPENAI_API_KEY=...
 export MI_COUNSELLOR_MODEL=gpt-4o-mini
 export MI_JUDGE_MODEL=gpt-4o-mini
-python3 -m mi_counsellor
+export MI_MITI_MODEL=gpt-4o-mini
+uv run mi-counsellor
 ```
 
-Optional:
+Optional endpoint override:
 
 ```bash
 export OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
-## Commands
+## CLI Commands
 
-- `/state` prints the internal motivational and process state as well as session dynamics used for pacing and strategy selection.
-- `/miti` prints a transcript-level MI fidelity report with 1-5 scores for cultivating change talk, softening sustain talk, partnership, empathy, autonomy support, and avoiding persuasion/advice without permission.
-- `/quit` exits.
+- `/state` prints the current safety, motivational language, MI process, and session dynamics state as JSON.
+- `/miti` prints a transcript-level MI fidelity report with 1-5 dimension scores and local validation metrics.
+- `/quit`, `/exit`, `quit`, or `exit` ends the session.
 
-The MITI validator uses `MI_MITI_MODEL` when `MI_LLM_PROVIDER=openai-compatible`; otherwise the deterministic demo model returns a local sample report.
+## Testing
+
+```bash
+uv run pytest
+```
+
+The current tests cover:
+
+- urgent-risk, out-of-scope, persuasive misuse, ambivalence, readiness, discord, and stagnation classification;
+- process-state movement back to engaging when discord appears;
+- local judge rejection for unpermitted advice and incomplete crisis handling;
+- MITI report parsing, score clamping, formatting, micro-metrics, and drift signals.
 
 ## Safety
 
-This is a prototype educational tool, not medical care. It avoids medication dosing, diagnosis, or emergency handling beyond supportive triage language and encourages qualified professional or emergency help when needed.
+This is a prototype educational tool, not medical care. It does not diagnose, prescribe, provide medication dosing, or replace a clinician, quitline, crisis service, or emergency support. Urgent-risk language bypasses generation and returns a crisis-oriented support message. Medical or medication content is handled with supportive reflection and referral to qualified help.
+
+The tool is scoped to smoking cessation, nicotine harm reduction, and autonomy-respecting health support. It blocks attempts to use MI for manipulative persuasion, selling harmful products, or bypassing safety boundaries.
+
+## Design Notes
+
+See [docs/design.md](docs/design.md) for the architecture, runtime flow, state model, guardrails, and extension points.
