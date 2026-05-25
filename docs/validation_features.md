@@ -38,5 +38,5 @@ Purpose: cover adversarial prompts that frame harmful persuasion as research, cl
 
 Implementation:
 
-- Extend the safety/scope classifier with authority-context patterns around motivational interviewing, behavioral modification, and harmful products.
-- Preserve the existing out-of-scope response that redirects to health-supporting, autonomy-respecting use.
+- Cover authority-context misuse in the safety/scope classifier prompt rather than with case-specific regexes.
+- Preserve the out-of-scope response path that redirects to health-supporting, autonomy-respecting use when the classifier returns persuasive misuse.

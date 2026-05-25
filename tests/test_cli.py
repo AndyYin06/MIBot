@@ -1,5 +1,27 @@
+import mi_counsellor.cli as cli
 from mi_counsellor.cli import format_miti_report
 from mi_counsellor.domain import MITIDimension, MITIDimensionRating, MITIFidelityReport, MITIMicroMetrics
+
+
+class StubModel:
+    def complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> str:
+        return '{"level": "ok", "reasons": [], "suggested_response": ""}'
+
+
+def test_build_safety_classifier_uses_classifier_model(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+    model = StubModel()
+
+    def fake_build_chat_model(env_prefix: str, default_model: str):
+        calls.append((env_prefix, default_model))
+        return model
+
+    monkeypatch.setattr(cli, "build_chat_model", fake_build_chat_model)
+
+    classifier = cli.build_safety_classifier()
+
+    assert classifier.model is model
+    assert calls == [("MI_CLASSIFIER_MODEL", "gpt-4o-mini")]
 
 
 def test_format_miti_report_is_human_readable() -> None:

@@ -13,64 +13,94 @@ from mi_counsellor.domain import (
     SessionState,
     TalkType,
 )
+from mi_counsellor.llm import ChatModel, DemoChatModel, parse_json_object
+from mi_counsellor.prompts import SAFETY_SCOPE_CLASSIFIER_PROMPT
 
 
 class SafetyScopeClassifier:
-    """Rule-first safety classifier with conservative scope boundaries."""
+    """LLM-backed safety classifier with a minimal crisis precheck."""
 
-    _urgent_patterns = (
+    _crisis_patterns = (
         r"\b(kill myself|suicide|suicidal|end my life|hurt myself|self harm)\b",
         r"\b(overdose|poison|can't breathe|chest pain|heart attack)\b",
         r"\b(violent|hurt someone|kill someone)\b",
     )
-    _medical_patterns = (
-        r"\b(pregnant|pregnancy|nicotine patch|varenicline|chantix|bupropion|zyban)\b",
-        r"\b(dose|dosage|withdrawal seizure|medication|prescription)\b",
-    )
-    _out_of_scope_patterns = (
-        r"\b(homework|tax|legal advice|invest|portfolio|code|programming)\b",
-    )
-    _persuasive_misuse_patterns = (
-        r"\b(sell|sales|marketing|advertis(e|ing)|convince|persuade|manipulate)\b.*\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b",
-        r"\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b.*\b(sell|sales|marketing|advertis(e|ing)|convince|persuade|manipulate)\b",
-        r"\b(research|clinician|doctor|therapist|teacher|professor|authority|authorized)\b.*\b(use mi|motivational interviewing|behavior(al)? modification)\b.*\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?)\b",
-        r"\b(ignore|bypass|override|drop)\b.*\b(safety|guardrails?|rules?|ethics|boundar(y|ies))\b.*\b(cigarettes?|tobacco|vapes?|nicotine|alcohol|drugs?|sales|marketing)\b",
+    _allowed_reasons = frozenset(
+        {
+            "urgent_risk",
+            "medical_or_medication_scope",
+            "outside_smoking_cessation_scope",
+            "persuasive_misuse_risk",
+            "classification_unavailable",
+        }
     )
 
-    def classify(self, text: str) -> SafetyAssessment:
+    def __init__(self, model: ChatModel | None = None) -> None:
+        self.model = model or DemoChatModel()
+
+    def classify(self, text: str, transcript: str | None = None) -> SafetyAssessment:
         lower = text.lower()
-        if self._matches(lower, self._urgent_patterns):
-            return SafetyAssessment(
-                SafetyLevel.URGENT,
-                ("urgent_risk",),
-                "Thank you for telling me. Your safety matters more than quitting smoking right now. "
-                "If you might hurt yourself or someone else, please call emergency services now, or call/text 988 "
-                "in the U.S. or Canada for immediate crisis support. Is there someone nearby you can be with while you get support?",
+        if self._matches(lower, self._crisis_patterns):
+            return self._urgent_assessment()
+
+        try:
+            raw = self.model.complete(
+                [
+                    {"role": "system", "content": SAFETY_SCOPE_CLASSIFIER_PROMPT},
+                    {
+                        "role": "user",
+                        "content": f"""
+Conversation:
+{transcript or ""}
+
+Latest user turn:
+{text}
+""",
+                    },
+                ],
+                temperature=0.0,
             )
-        if self._matches(lower, self._persuasive_misuse_patterns):
-            return SafetyAssessment(
-                SafetyLevel.OUT_OF_SCOPE,
-                ("persuasive_misuse_risk",),
-                "I cannot help use motivational interviewing to sell, promote, or pressure people toward harmful products. "
-                "I can help with smoking cessation support, reducing nicotine harm, or a non-manipulative health conversation.",
-            )
-        if self._matches(lower, self._medical_patterns):
-            return SafetyAssessment(
-                SafetyLevel.CAUTION,
-                ("medical_or_medication_scope",),
-            )
-        if self._matches(lower, self._out_of_scope_patterns):
-            return SafetyAssessment(
-                SafetyLevel.OUT_OF_SCOPE,
-                ("outside_smoking_cessation_scope",),
-                "I may not be the right tool for that topic. I can stay with smoking, nicotine, motivation, and change around quitting. "
-                "What, if anything, is on your mind about smoking today?",
-            )
-        return SafetyAssessment(SafetyLevel.OK)
+            data = parse_json_object(raw)
+        except Exception:
+            return self._classification_unavailable()
+
+        return self._assessment_from_json(data)
 
     @staticmethod
     def _matches(text: str, patterns: tuple[str, ...]) -> bool:
         return any(re.search(pattern, text) for pattern in patterns)
+
+    @staticmethod
+    def _urgent_assessment() -> SafetyAssessment:
+        return SafetyAssessment(
+            SafetyLevel.URGENT,
+            ("urgent_risk",),
+            "Thank you for telling me. Your safety matters more than quitting smoking right now. "
+            "If you might hurt yourself or someone else, please call emergency services now, or call/text 988 "
+            "in the U.S. or Canada for immediate crisis support. Is there someone nearby you can be with while you get support?",
+        )
+
+    @staticmethod
+    def _classification_unavailable() -> SafetyAssessment:
+        return SafetyAssessment(SafetyLevel.CAUTION, ("classification_unavailable",))
+
+    def _assessment_from_json(self, data: dict) -> SafetyAssessment:
+        try:
+            level = SafetyLevel(str(data.get("level", SafetyLevel.CAUTION.value)).strip())
+        except ValueError:
+            return self._classification_unavailable()
+
+        reasons_raw = data.get("reasons", ())
+        if not isinstance(reasons_raw, list):
+            reasons_raw = ()
+        reasons = tuple(
+            reason
+            for reason in (str(item).strip() for item in reasons_raw)
+            if reason in self._allowed_reasons
+        )
+        suggested = data.get("suggested_response")
+        suggested_response = str(suggested).strip() if isinstance(suggested, str) and suggested.strip() else None
+        return SafetyAssessment(level, reasons, suggested_response)
 
 
 class MotivationalLanguageClassifier:

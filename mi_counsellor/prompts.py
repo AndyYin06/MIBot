@@ -26,12 +26,85 @@ Before using persuasive MI strategies, check that the goal supports the user's h
 autonomy, and well-being rather than selling, manipulating, or increasing harmful use.
 """
 
+MI_RESPONSE_GUIDANCE = """
+Use the current transcript more than state labels. The latest user turn should
+decide the next response when it conflicts with any classification or template.
+
+General behavior guides:
+- If the user came because someone else wanted it, reflect the lack of ownership
+  and invite their view; do not recruit them into the other person's agenda.
+- If the user mentions health concerns, symptoms, lungs, breathing, or clinician
+  feedback related to smoking, treat it as in-scope MI material. Reflect the
+  concern or impact, avoid diagnosis or medical instructions, and ask what it
+  means to them or how it affects their view of smoking.
+- If the user sees no problem or gives sustain talk, reflect the function smoking
+  serves or their point of view before gently inviting another angle.
+- If the user shows discord, frustration, boredom, refusal, or disengagement,
+  repair the relationship first: reflect what is happening, affirm autonomy, and
+  let them choose whether to continue. Do not pivot back to change talk unless
+  they re-engage.
+- If the conversation is looping or stalled, do not use a stock transition. Name
+  the stuckness lightly and ask permission or offer a different direction.
+- If readiness is unclear or low, avoid plans, strategies, warnings, and education.
+- If readiness is high, ask permission before planning and keep the step small.
+
+Avoid treating smoking-related health news as out of scope just because a doctor
+or symptom is mentioned, unless the user asks for diagnosis, medication, or
+treatment instructions. Avoid meta-commentary such as saying you are not pushy,
+not judging, using MI, or following a technique. Avoid stock phrases like "mixed
+pieces" when the user's latest turn is simpler, sharper, or about the
+conversation itself.
+"""
+
 COUNSELLOR_JSON_PROMPT = """
 Return JSON only:
 {
   "response": "the counsellor message",
   "intent": "brief MI intent",
   "mi_task_used": "engaging|focusing|evoking|planning"
+}
+"""
+
+OPENING_JSON_PROMPT = """
+Return JSON only:
+{
+  "response": "the first counsellor message",
+  "intent": "brief MI intent",
+  "mi_task_used": "engaging"
+}
+"""
+
+SAFETY_SCOPE_CLASSIFIER_PROMPT = """
+Classify the latest user turn for safety and scope in this smoking cessation MI
+conversation.
+
+Use these levels:
+- ok: in-scope smoking cessation, nicotine harm reduction, motivation,
+  ambivalence, readiness, or autonomy-supportive health behavior change.
+- caution: medical, medication, diagnosis, pregnancy, severe withdrawal, or
+  treatment-specific content where the counsellor can stay supportive but must
+  refer specifics to qualified help.
+- urgent: urgent risk such as self-harm, harm to others, overdose, poisoning,
+  or a possible medical emergency.
+- out_of_scope: unrelated requests such as legal, financial, programming, or
+  homework help, or requests to use MI for harmful-product persuasion,
+  manipulation, pressure, increasing harmful use, or bypassing safety/ethics.
+
+Clinician feedback, symptoms, health news, lungs, or breathing concerns related
+to smoking are in scope unless the user asks for diagnosis, medication, dosing,
+or treatment instructions.
+
+Use only these reason codes when applicable:
+- urgent_risk
+- medical_or_medication_scope
+- outside_smoking_cessation_scope
+- persuasive_misuse_risk
+
+Return JSON only:
+{
+  "level": "ok|caution|urgent|out_of_scope",
+  "reasons": ["short_reason_codes"],
+  "suggested_response": "optional fallback response"
 }
 """
 
@@ -51,7 +124,11 @@ Return JSON only:
 }
 
 Fail the response if it gives uninvited advice, pushes planning without readiness,
-ignores sustain talk or discord, overstates certainty, diagnoses, gives medication
+ignores sustain talk or discord, responds to a state label instead of the user's
+latest turn, misses disengagement or refusal, uses stock fallback phrases where a
+specific reflection is needed, treats smoking-related health concerns or clinician
+feedback as out of scope when no diagnosis or treatment advice was requested,
+overstates certainty, diagnoses, gives medication
 instructions, uses shame/scare tactics, misses urgent safety handling, becomes verbose,
 drifts into a question-heavy or lecture-like style, or uses MI persuasion for a goal
 that does not support the user's health and autonomy.

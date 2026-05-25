@@ -49,6 +49,14 @@ class DemoChatModel:
 
     def complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> str:
         joined = "\n".join(message["content"] for message in messages[-3:])
+        if "Classify the latest user turn for safety and scope" in joined:
+            return json.dumps(
+                {
+                    "level": "ok",
+                    "reasons": [],
+                    "suggested_response": "",
+                }
+            )
         if "MITI-informed global coding lens" in joined:
             return json.dumps(
                 {
@@ -118,6 +126,15 @@ class DemoChatModel:
                     "repair_instruction": "",
                 }
             )
+        if "This is the first counsellor turn" in joined:
+            response = "Hi, I'm glad you're here. What's been on your mind about smoking lately?"
+            return json.dumps(
+                {
+                    "response": response,
+                    "intent": "open warmly and invite the user's perspective",
+                    "mi_task_used": "engaging",
+                }
+            )
         if "Current safety/scope assessment: caution" in joined:
             response = (
                 "That sounds important, and I want to be careful with medical details. "
@@ -126,13 +143,13 @@ class DemoChatModel:
             )
         elif "Current motivational language: discord" in joined:
             response = (
-                "You are right to say so if this is feeling off. This is your choice, and I do not want to push. "
-                "What would make this conversation feel more useful to you?"
+                "This conversation may not feel useful right now. "
+                "What would you prefer to do from here?"
             )
         elif "stagnant=True" in joined:
             response = (
-                "We may be circling the same spot, and I do not want to force it. "
-                "What is one thing smoking protects for you, and one thing it costs you?"
+                "We may be circling the same spot. "
+                "Would it help to look at this from a different angle, or would you rather pause here?"
             )
         elif "Current motivational language: sustain_talk" in joined:
             response = (

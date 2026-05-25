@@ -5,7 +5,29 @@ from dataclasses import dataclass
 from mi_counsellor.domain import ConversationTurn, SafetyLevel, SessionState, TalkType
 from mi_counsellor.llm import ChatModel, parse_json_object
 from mi_counsellor.miti import MITIMicroMetricAnalyzer
-from mi_counsellor.prompts import COUNSELLOR_JSON_PROMPT, JUDGE_JSON_PROMPT, MI_STYLE_GUIDE
+from mi_counsellor.prompts import (
+    COUNSELLOR_JSON_PROMPT,
+    JUDGE_JSON_PROMPT,
+    MI_RESPONSE_GUIDANCE,
+    MI_STYLE_GUIDE,
+    OPENING_JSON_PROMPT,
+)
+
+
+OPENING_FALLBACK = (
+    "Hi, I'm glad you're here. "
+    "What would you like me to understand about smoking in your life right now?"
+)
+
+OPENING_DISALLOWED_TERMS = (
+    "push",
+    "judg",
+    "nonjudgmental",
+    "non-judgmental",
+    "motivational interviewing",
+    "counselling technique",
+    "counseling technique",
+)
 
 
 @dataclass(frozen=True)
@@ -45,9 +67,22 @@ class Counsellor:
         self.model = model
 
     def opening(self) -> str:
-        return (
-            "Hi, I am here to talk with you about smoking in a way that does not push or judge. "
-            "What would you like me to understand about your smoking right now?"
+        return OPENING_FALLBACK
+
+    def draft_opening(self, repair_instruction: str | None = None) -> DraftResponse:
+        prompt = self._build_opening_prompt(repair_instruction)
+        raw = self.model.complete(
+            [
+                {"role": "system", "content": MI_STYLE_GUIDE},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.55,
+        )
+        data = parse_json_object(raw)
+        return DraftResponse(
+            text=str(data.get("response", "")).strip(),
+            intent=str(data.get("intent", "")).strip(),
+            task_used=str(data.get("mi_task_used", "engaging")).strip(),
         )
 
     def draft(self, state: SessionState, repair_instruction: str | None = None) -> DraftResponse:
@@ -79,9 +114,26 @@ Current session dynamics: rapport={state.dynamics.rapport}; goal_alignment={stat
 Smoking cessation is the focus. Do not give a quit plan unless the user has shown readiness and you ask permission.
 If caution scope is present, be supportive and suggest a qualified clinician for medical specifics.
 Keep this turn brief enough to invite continued conversation.
+Use this guidance to adapt to the user's current behavior without sounding scripted:
+{MI_RESPONSE_GUIDANCE}
 {f"Repair the prior response using this instruction: {repair_instruction}" if repair_instruction else ""}
 
 {COUNSELLOR_JSON_PROMPT}
+"""
+
+    def _build_opening_prompt(self, repair_instruction: str | None) -> str:
+        return f"""
+This is the first counsellor turn before the user has said anything.
+
+Smoking cessation is the focus, but do not assume the user's readiness or reasons.
+Start the conversation naturally and briefly.
+Do not mention motivational interviewing, counselling technique, being nonjudgmental,
+not judging, not being pushy, or similar meta-framing.
+Keep the tone warm, human, non-clinical, and open-ended.
+Invite the user's perspective rather than explaining the counsellor's stance.
+{f"Repair the prior response using this instruction: {repair_instruction}" if repair_instruction else ""}
+
+{OPENING_JSON_PROMPT}
 """
 
 
@@ -104,6 +156,9 @@ State:
 safety={state.safety}
 process={state.process}
 language={state.language}
+
+Response guidance:
+{MI_RESPONSE_GUIDANCE}
 
 Candidate response:
 {draft.text}
@@ -206,36 +261,9 @@ class FallbackPolicy:
                 "What would feel useful to explore here about your own reasons for changing, if any?"
             )
 
-        if state.language.dominant == TalkType.DISCORD:
-            return (
-                "You are right to push back if this feels like pressure. This is your choice. "
-                "What would make this conversation feel more useful, or would you rather simply talk through what smoking does for you?"
-            )
-
-        if state.dynamics.stagnant:
-            return (
-                "We may be circling the same spot, and I do not want to force it. "
-                "What is one thing smoking protects for you, and one thing it costs you?"
-            )
-
-        if state.language.dominant == TalkType.SUSTAIN:
-            return (
-                "Smoking is doing something for you, especially when things are stressful. "
-                "What do you like about it, and what, if anything, concerns you about keeping things the same?"
-            )
-
-        if state.process.slow_down:
-            return (
-                "There are a few mixed pieces here, so I do not want to rush you into a plan. "
-                "What feels most true for you right now about smoking and the possibility of changing it?"
-            )
-
-        suffix = ""
-        if judge and judge.problems:
-            suffix = " "
         return (
-            "Let me slow down and stay with your perspective."
-            f"{suffix}What matters most to you about smoking right now?"
+            "I may be missing what matters most in this moment. "
+            "What would you prefer to do from here?"
         )
 
 
@@ -244,6 +272,27 @@ class MIEngine:
         self.counsellor = counsellor
         self.judge = judge
         self.fallback = fallback
+
+    def opening_response(self, state: SessionState) -> str:
+        repair_instruction: str | None = None
+        for _ in range(2):
+            try:
+                draft = self.counsellor.draft_opening(repair_instruction)
+                if not draft.text:
+                    break
+                judge_result = self.judge.evaluate(state, draft)
+            except Exception:
+                break
+            if judge_result.accepted and self._opening_text_allowed(draft.text):
+                return draft.text
+            repair_instruction = judge_result.repair_instruction or "; ".join(judge_result.problems)
+            if not self._opening_text_allowed(draft.text):
+                repair_instruction = (
+                    f"{repair_instruction} Avoid explicit meta-language about not pushing, not judging, "
+                    "being nonjudgmental, motivational interviewing, or counselling technique."
+                ).strip()
+
+        return self.counsellor.opening()
 
     def next_response(self, state: SessionState) -> str:
         if state.safety.level in {SafetyLevel.URGENT, SafetyLevel.OUT_OF_SCOPE}:
@@ -261,3 +310,8 @@ class MIEngine:
             repair_instruction = last_judge.repair_instruction or "; ".join(last_judge.problems)
 
         return self.fallback.response(state, last_judge)
+
+    @staticmethod
+    def _opening_text_allowed(text: str) -> bool:
+        lower = text.lower()
+        return not any(term in lower for term in OPENING_DISALLOWED_TERMS)

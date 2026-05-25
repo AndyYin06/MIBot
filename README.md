@@ -7,7 +7,7 @@ The default runtime is deterministic and local, so the project works without net
 ## What It Does
 
 - Runs an interactive smoking cessation counselling session in the terminal.
-- Classifies each user turn for urgent risk, medical scope, out-of-scope topics, and persuasive misuse.
+- Uses an LLM-backed classifier for medical scope, out-of-scope topics, and persuasive misuse, with a minimal deterministic crisis precheck for urgent risk.
 - Tracks change talk, sustain talk, ambivalence, discord, readiness hints, rapport, goal alignment, and stagnation.
 - Estimates the active MI task as engaging, focusing, evoking, or planning without forcing a linear stage progression.
 - Drafts concise MI-consistent responses and validates them before display.
@@ -85,14 +85,14 @@ uv run pytest
 
 The current tests cover:
 
-- urgent-risk, out-of-scope, persuasive misuse, ambivalence, readiness, discord, and stagnation classification;
+- crisis precheck behavior, model-backed safety/scope parsing, ambivalence, readiness, discord, and stagnation classification;
 - process-state movement back to engaging when discord appears;
 - local judge rejection for unpermitted advice and incomplete crisis handling;
 - MITI report parsing, score clamping, formatting, micro-metrics, and drift signals.
 
 ## Safety
 
-This is a prototype educational tool, not medical care. It does not diagnose, prescribe, provide medication dosing, or replace a clinician, quitline, crisis service, or emergency support. Urgent-risk language bypasses generation and returns a crisis-oriented support message. Medical or medication content is handled with supportive reflection and referral to qualified help.
+This is a prototype educational tool, not medical care. It does not diagnose, prescribe, provide medication dosing, or replace a clinician, quitline, crisis service, or emergency support. Direct urgent-risk language bypasses generation and returns a crisis-oriented support message. Medical or medication content is classified by the safety/scope model and handled with supportive reflection and referral to qualified help.
 
 The tool is scoped to smoking cessation, nicotine harm reduction, and autonomy-respecting health support. It blocks attempts to use MI for manipulative persuasion, selling harmful products, or bypassing safety boundaries.
 

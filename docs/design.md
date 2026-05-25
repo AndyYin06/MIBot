@@ -2,7 +2,7 @@
 
 This project is a command-line motivational interviewing (MI) counsellor for smoking cessation. It uses a gated generation loop: each user turn is classified, session state is updated, a counsellor response is drafted, and a judge validates the draft before anything is shown to the user.
 
-The implementation is deliberately rule-first around safety, scope, process state, and local fidelity checks. That keeps the demo deterministic, makes clinical guardrails inspectable, and leaves clear places to swap in stronger model-backed or corpus-trained components later.
+The implementation uses an LLM-backed safety/scope classifier with a minimal deterministic crisis precheck, plus rule-based process state and local fidelity checks. That keeps urgent-risk handling fail-closed while leaving nuanced scope judgment to the model and prompts.
 
 ## Goals
 
@@ -44,9 +44,9 @@ The CLI also supports diagnostic commands that do not add user turns:
 
 `mi_counsellor.domain` defines the shared dataclasses and enums: safety level, MI task, motivational talk type, session dynamics, transcript turns, process assessment, and MITI report structures.
 
-`mi_counsellor.classifiers` contains transparent rule-based analyzers:
+`mi_counsellor.classifiers` contains the safety/scope classifier and transparent rule-based analyzers:
 
-- `SafetyScopeClassifier` detects urgent risk, medical caution scope, out-of-scope topics, and persuasive misuse.
+- `SafetyScopeClassifier` uses a `ChatModel` and structured prompt for medical caution scope, out-of-scope topics, and persuasive misuse, while direct crisis language uses a minimal deterministic precheck.
 - `MotivationalLanguageClassifier` identifies change talk, sustain talk, ambivalence, discord, and readiness hints.
 - `SessionDynamicsAnalyzer` tracks rapport, goal alignment, motivational direction, consecutive sustain talk or discord, stagnation, and a recommended next strategy.
 - `MIProcessStateIdentifier` estimates the current MI task from the latest language, conversation length, and dynamics.
@@ -80,11 +80,11 @@ The process identifier can move backward. Discord or relational strain returns t
 
 Safety and scope checks happen before any generated response is accepted.
 
-Urgent-risk language, including self-harm, violence, overdose, breathing emergencies, chest pain, or heart-attack language, bypasses generation and returns a crisis-oriented support message with emergency or 988 guidance.
+Direct urgent-risk language, including self-harm, violence, overdose, breathing emergencies, chest pain, or heart-attack language, bypasses model classification and generation, returning a crisis-oriented support message with emergency or 988 guidance.
 
-Medical and medication topics are classified as caution scope. The counsellor may reflect and support motivation, but it must not diagnose, prescribe, or provide dosing instructions. It redirects medical specifics to a clinician or quitline.
+Medical and medication topics are classified by the safety/scope model as caution scope when appropriate. The counsellor may reflect and support motivation, but it must not diagnose, prescribe, or provide dosing instructions. It redirects medical specifics to a clinician or quitline.
 
-Out-of-scope requests are redirected to smoking, nicotine, motivation, and quitting. Attempts to use MI for selling, manipulating, promoting harmful products, or bypassing ethical guardrails are blocked as persuasive misuse.
+Out-of-scope requests are redirected to smoking, nicotine, motivation, and quitting. The classifier prompt instructs the model to block attempts to use MI for selling, manipulating, promoting harmful products, or bypassing ethical guardrails as persuasive misuse.
 
 ## Generation and Validation
 
@@ -137,7 +137,7 @@ The helper script at `tools/extract_mi_source_notes.py` extracts source-note sni
 
 The test suite focuses on behavior at the seams where regressions would matter most:
 
-- safety, scope, persuasive misuse, ambivalence, readiness, discord, and stagnation classification;
+- crisis precheck behavior, model-backed safety/scope parsing, ambivalence, readiness, discord, and stagnation classification;
 - MI process transitions, especially returning to engaging when discord appears;
 - judge rejection of unpermitted advice and incomplete crisis responses;
 - MITI report parsing, score clamping, human-readable formatting, local micro-metrics, and drift flags.
@@ -148,7 +148,7 @@ Because the default model is deterministic, tests do not require network access 
 
 Likely next improvements:
 
-- Replace selected rule-based classifiers with trained or evaluated classifiers while preserving the same dataclass outputs.
+- Evaluate the LLM-backed safety/scope classifier against adversarial and realistic conversation fixtures while preserving the same dataclass outputs.
 - Expand safety and scope tests with adversarial prompt variants.
 - Add richer transcript fixtures for longer-session MITI drift testing.
 - Persist sessions for replay and regression evaluation.

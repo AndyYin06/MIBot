@@ -26,6 +26,11 @@ def build_miti_validator() -> MITIFidelityValidator:
     return MITIFidelityValidator(model)
 
 
+def build_safety_classifier() -> SafetyScopeClassifier:
+    model = build_chat_model("MI_CLASSIFIER_MODEL", "gpt-4o-mini")
+    return SafetyScopeClassifier(model)
+
+
 def print_state(state: SessionState) -> None:
     import json
 
@@ -122,7 +127,7 @@ def _label_dimension(value: str) -> str:
 
 
 def main() -> int:
-    safety_classifier = SafetyScopeClassifier()
+    safety_classifier = build_safety_classifier()
     language_classifier = MotivationalLanguageClassifier()
     dynamics_analyzer = SessionDynamicsAnalyzer()
     process_identifier = MIProcessStateIdentifier()
@@ -130,7 +135,7 @@ def main() -> int:
     miti_validator = build_miti_validator()
     state = SessionState()
 
-    opening = counsellor.opening()
+    opening = engine.opening_response(state)
     state.add_turn("counsellor", opening)
     print(f"Counsellor: {opening}")
 
@@ -157,7 +162,7 @@ def main() -> int:
             continue
 
         state.add_turn("user", user_text)
-        state.safety = safety_classifier.classify(user_text)
+        state.safety = safety_classifier.classify(user_text, state.transcript())
         state.language = language_classifier.classify(user_text)
         state.dynamics = dynamics_analyzer.update(state)
         state.process = process_identifier.identify(state)
