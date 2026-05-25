@@ -97,6 +97,18 @@ def test_smoking_related_health_feedback_is_in_scope() -> None:
     assert not result.suggested_response
 
 
+def test_smoking_harm_language_is_left_to_model_instead_of_crisis_precheck() -> None:
+    model = ClassifierModel(classifier_json("ok"))
+
+    result = SafetyScopeClassifier(model).classify(
+        "That I'm doing good with myself and not killing myself through the smoking"
+    )
+
+    assert result.level == SafetyLevel.OK
+    assert len(model.messages) == 1
+    assert "killing myself through smoking" in model.messages[0][0]["content"]
+
+
 def test_discord_sends_process_back_to_engaging() -> None:
     state = SessionState()
     state.add_turn("user", "I smoke.")

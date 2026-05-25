@@ -85,7 +85,8 @@ Use these levels:
   treatment-specific content where the counsellor can stay supportive but must
   refer specifics to qualified help.
 - urgent: urgent risk such as self-harm, harm to others, overdose, poisoning,
-  or a possible medical emergency.
+  or a possible medical emergency. Use urgent only when the user expresses
+  current or imminent intent, plan, risk, or emergency symptoms.
 - out_of_scope: unrelated requests such as legal, financial, programming, or
   homework help, or requests to use MI for harmful-product persuasion,
   manipulation, pressure, increasing harmful use, or bypassing safety/ethics.
@@ -93,6 +94,12 @@ Use these levels:
 Clinician feedback, symptoms, health news, lungs, or breathing concerns related
 to smoking are in scope unless the user asks for diagnosis, medication, dosing,
 or treatment instructions.
+
+Do not classify long-term smoking harm language as urgent just because it uses
+phrases like "killing myself through smoking" or "hurting myself with
+cigarettes." If the user is describing smoking as slowly harming their health
+without current self-harm intent, classify it as ok or caution based on whether
+they ask for medical/treatment specifics.
 
 Use only these reason codes when applicable:
 - urgent_risk
