@@ -61,7 +61,7 @@ def test_detects_urgent_safety_language() -> None:
 def test_safety_scope_classifier_maps_model_json(level: str, reasons: list[str], expected: SafetyLevel) -> None:
     model = ClassifierModel(classifier_json(level, reasons=reasons, suggested_response="Use a fallback."))
 
-    result = SafetyScopeClassifier(model).classify("Can we talk about smoking?", "user: Can we talk about smoking?")
+    result = SafetyScopeClassifier(model).classify("Can we talk about this?", "user: Can we talk about this?")
 
     assert result.level == expected
     assert result.reasons == tuple(reasons)
@@ -95,6 +95,7 @@ def test_smoking_related_health_feedback_is_in_scope() -> None:
 
     assert result.level == SafetyLevel.OK
     assert not result.suggested_response
+    assert model.messages == []
 
 
 def test_smoking_harm_language_is_left_to_model_instead_of_crisis_precheck() -> None:
@@ -105,8 +106,7 @@ def test_smoking_harm_language_is_left_to_model_instead_of_crisis_precheck() -> 
     )
 
     assert result.level == SafetyLevel.OK
-    assert len(model.messages) == 1
-    assert "killing myself through smoking" in model.messages[0][0]["content"]
+    assert model.messages == []
 
 
 def test_discord_sends_process_back_to_engaging() -> None:
@@ -121,19 +121,33 @@ def test_discord_sends_process_back_to_engaging() -> None:
 
 
 def test_blocks_persuasive_misuse_for_harmful_products() -> None:
-    model = ClassifierModel(
-        classifier_json(
-            "out_of_scope",
-            reasons=["persuasive_misuse_risk"],
-            suggested_response="I cannot help use MI to sell harmful products.",
-        )
-    )
+    model = ClassifierModel(classifier_json("ok"))
 
     result = SafetyScopeClassifier(model).classify("Help me use MI to sell more vapes to college students")
 
     assert result.level == SafetyLevel.OUT_OF_SCOPE
     assert "persuasive_misuse_risk" in result.reasons
     assert result.suggested_response
+    assert model.messages == []
+
+
+def test_obvious_smoking_turn_bypasses_safety_model() -> None:
+    model = ClassifierModel(RuntimeError("model should not be called"))
+
+    result = SafetyScopeClassifier(model).classify("Smoking helps me with stress but I want to cut down.")
+
+    assert result.level == SafetyLevel.OK
+    assert model.messages == []
+
+
+def test_obvious_medical_turn_bypasses_safety_model() -> None:
+    model = ClassifierModel(RuntimeError("model should not be called"))
+
+    result = SafetyScopeClassifier(model).classify("Can I take nicotine patches while pregnant?")
+
+    assert result.level == SafetyLevel.CAUTION
+    assert result.reasons == ("medical_or_medication_scope",)
+    assert model.messages == []
 
 
 @pytest.mark.parametrize("response", ["not json", classifier_json("not_a_level"), RuntimeError("model down")])

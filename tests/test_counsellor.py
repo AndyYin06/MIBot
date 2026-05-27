@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Any
 
 import pytest
@@ -35,6 +36,42 @@ class SequencedModel:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+class StreamingModel:
+    def __init__(self, chunks: list[str], fallback_response: str | Exception | None = None) -> None:
+        self.chunks = chunks
+        self.fallback_response = fallback_response
+        self.stream_messages: list[list[dict[str, str]]] = []
+        self.messages: list[list[dict[str, str]]] = []
+
+    def stream_complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4):
+        self.stream_messages.append(messages)
+        yield from self.chunks
+
+    def complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> str:
+        self.messages.append(messages)
+        if isinstance(self.fallback_response, Exception):
+            raise self.fallback_response
+        return self.fallback_response or counsellor_json("Fallback draft.")
+
+
+class FailingStreamingModel(StreamingModel):
+    def stream_complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4):
+        self.stream_messages.append(messages)
+        raise RuntimeError("stream unavailable")
+        yield ""
+
+
+class SlowStreamingModel(StreamingModel):
+    def __init__(self, chunks: list[str], delay_seconds: float) -> None:
+        super().__init__(chunks)
+        self.delay_seconds = delay_seconds
+
+    def stream_complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4):
+        self.stream_messages.append(messages)
+        time.sleep(self.delay_seconds)
+        yield from self.chunks
 
 
 def counsellor_json(response: str) -> str:
@@ -189,6 +226,76 @@ def test_counsellor_prompt_treats_smoking_related_health_feedback_as_in_scope() 
     assert "feedback related to smoking" in prompt
     assert "treat it as in-scope MI material" in prompt
     assert "avoid diagnosis or medical instructions" in prompt
+
+
+def test_stream_next_response_yields_counsellor_chunks_without_judge_call() -> None:
+    counsellor_model = StreamingModel(["That sounds ", "stressful."])
+    judge_model = SequencedModel([RuntimeError("judge should not block streaming")])
+    engine = build_engine(counsellor_model, judge_model)
+    state = SessionState()
+    state.add_turn("user", "Smoking helps me with stress.")
+
+    chunks = list(engine.stream_next_response(state))
+
+    assert chunks == ["That sounds ", "stressful."]
+    assert len(counsellor_model.stream_messages) == 1
+    assert "Return only the counsellor message text." in counsellor_model.stream_messages[0][-1]["content"]
+    assert judge_model.messages == []
+
+
+def test_stream_next_response_with_deadline_uses_local_reply_when_streaming_unavailable() -> None:
+    counsellor_model = FailingStreamingModel([], RuntimeError("draft should not be called"))
+    engine = build_engine(counsellor_model, AcceptingJudgeModel())
+    state = SessionState()
+    state.add_turn("user", "Smoking helps me with stress.")
+
+    chunks = list(engine.stream_next_response_with_deadline(state, first_token_timeout_seconds=0.1))
+
+    assert chunks == [Counsellor(counsellor_model).local_response(state)]
+    assert engine.last_stream_mode == "local_stream_error"
+    assert len(counsellor_model.stream_messages) == 1
+    assert counsellor_model.messages == []
+
+
+def test_stream_next_response_with_deadline_uses_local_reply_when_first_chunk_is_slow() -> None:
+    counsellor_model = SlowStreamingModel(["Late LLM reply."], delay_seconds=0.05)
+    engine = build_engine(counsellor_model, AcceptingJudgeModel())
+    state = SessionState()
+    state.add_turn("user", "Smoking helps me with stress.")
+
+    started = time.perf_counter()
+    chunks = list(engine.stream_next_response_with_deadline(state, first_token_timeout_seconds=0.01))
+
+    assert chunks == [Counsellor(counsellor_model).local_response(state)]
+    assert time.perf_counter() - started < 0.04
+    assert engine.last_stream_mode == "local_timeout"
+
+
+def test_stream_next_response_with_deadline_streams_prompt_first_chunk() -> None:
+    counsellor_model = StreamingModel(["That sounds ", "stressful."])
+    judge_model = SequencedModel([RuntimeError("judge should not block streaming")])
+    engine = build_engine(counsellor_model, judge_model)
+    state = SessionState()
+    state.add_turn("user", "Smoking helps me with stress.")
+
+    chunks = list(engine.stream_next_response_with_deadline(state, first_token_timeout_seconds=0.1))
+
+    assert chunks == ["That sounds ", "stressful."]
+    assert engine.last_stream_mode == "llm_stream"
+    assert judge_model.messages == []
+
+
+def test_stream_next_response_routes_urgent_turn_to_fallback_without_generation() -> None:
+    counsellor_model = StreamingModel(["unused"])
+    engine = build_engine(counsellor_model, AcceptingJudgeModel())
+    state = SessionState()
+    state.safety = SafetyAssessment(SafetyLevel.URGENT, ("urgent_risk",), "Use crisis support now.")
+
+    chunks = list(engine.stream_next_response_with_deadline(state, first_token_timeout_seconds=0.1))
+
+    assert chunks == ["Use crisis support now."]
+    assert engine.last_stream_mode == "safety_fallback"
+    assert counsellor_model.stream_messages == []
 
 
 def test_judge_prompt_includes_guidance_to_prioritize_latest_user_turn() -> None:

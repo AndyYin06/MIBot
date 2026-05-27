@@ -18,7 +18,7 @@ from mi_counsellor.prompts import SAFETY_SCOPE_CLASSIFIER_PROMPT
 
 
 class SafetyScopeClassifier:
-    """LLM-backed safety classifier with a minimal crisis precheck."""
+    """Rule-first safety classifier with an LLM fallback for ambiguous turns."""
 
     _crisis_patterns = (
         r"\b(kill myself|suicide|suicidal|end my life|hurt myself|self harm)\b",
@@ -34,6 +34,23 @@ class SafetyScopeClassifier:
             "classification_unavailable",
         }
     )
+    _harmful_persuasion_patterns = (
+        r"\b(use mi|motivational interviewing).*\b(sell|market|push|persuade|convince).*\b(vapes?|cigarettes?|tobacco|nicotine)\b",
+        r"\b(sell|market|push|persuade|convince).*\b(vapes?|cigarettes?|tobacco|nicotine)\b",
+    )
+    _out_of_scope_patterns = (
+        r"\b(programming|code|debug|homework|essay|legal advice|financial advice|taxes)\b",
+    )
+    _medical_scope_patterns = (
+        r"\b(medication|medicine|prescription|dose|dosage|patch|gum|varenicline|chantix|bupropion|zyban)\b",
+        r"\b(pregnant|pregnancy|severe withdrawal|withdrawal symptoms|treatment plan)\b",
+        r"\b(should i take|can i take|how much|side effects)\b",
+    )
+    _smoking_scope_patterns = (
+        r"\b(smok(e|ing)|cigarettes?|tobacco|nicotine|vaping|vape|quit|cut down|cravings?)\b",
+        r"\b(not ready|ready|stress|helps me|want to stop|want to quit|trying to quit)\b",
+        r"\b(lungs?|breathing|doctor said|clinician said)\b",
+    )
 
     def __init__(self, model: ChatModel | None = None) -> None:
         self.model = model or DemoChatModel()
@@ -42,6 +59,9 @@ class SafetyScopeClassifier:
         lower = text.lower()
         if self._matches(lower, self._crisis_patterns):
             return self._urgent_assessment()
+        rule_based = self._rule_based_assessment(lower)
+        if rule_based:
+            return rule_based
 
         try:
             raw = self.model.complete(
@@ -65,6 +85,21 @@ Latest user turn:
             return self._classification_unavailable()
 
         return self._assessment_from_json(data)
+
+    def _rule_based_assessment(self, text: str) -> SafetyAssessment | None:
+        if self._matches(text, self._harmful_persuasion_patterns):
+            return SafetyAssessment(
+                SafetyLevel.OUT_OF_SCOPE,
+                ("persuasive_misuse_risk",),
+                "I cannot help use motivational interviewing to sell or promote harmful nicotine products.",
+            )
+        if self._matches(text, self._out_of_scope_patterns) and not self._matches(text, self._smoking_scope_patterns):
+            return SafetyAssessment(SafetyLevel.OUT_OF_SCOPE, ("outside_smoking_cessation_scope",))
+        if self._matches(text, self._medical_scope_patterns):
+            return SafetyAssessment(SafetyLevel.CAUTION, ("medical_or_medication_scope",))
+        if self._matches(text, self._smoking_scope_patterns):
+            return SafetyAssessment(SafetyLevel.OK)
+        return None
 
     @staticmethod
     def _matches(text: str, patterns: tuple[str, ...]) -> bool:

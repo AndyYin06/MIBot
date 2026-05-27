@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import copy
+import os
 import sys
+import threading
+import time
 
 from mi_counsellor.classifiers import (
     MIProcessStateIdentifier,
@@ -126,6 +130,48 @@ def _label_dimension(value: str) -> str:
     return labels.get(value, value.replace("_", " ").capitalize())
 
 
+def _latency_debug_enabled() -> bool:
+    return os.getenv("MI_LATENCY_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _first_token_timeout_seconds() -> float:
+    raw = os.getenv("MI_FIRST_TOKEN_TIMEOUT_SECONDS", "2.5")
+    try:
+        timeout = float(raw)
+    except ValueError:
+        return 2.5
+    return max(0.0, timeout)
+
+
+def _generated_opening_enabled() -> bool:
+    return os.getenv("MI_GENERATED_OPENING", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _print_latency(timings: dict[str, float], *, mode: str) -> None:
+    if not _latency_debug_enabled():
+        return
+    parts = [f"{name}={value * 1000:.0f}ms" for name, value in timings.items()]
+    print(f"[latency] mode={mode} {' '.join(parts)}", file=sys.stderr)
+
+
+def _run_diagnostic_judge(engine: MIEngine, state: SessionState, response: str) -> None:
+    started = time.perf_counter()
+    try:
+        result = engine.diagnostic_judge(state, response)
+    except Exception as exc:
+        print(f"[diagnostic] judge failed after {(time.perf_counter() - started) * 1000:.0f}ms: {exc}", file=sys.stderr)
+        return
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if not result.accepted:
+        print(
+            f"[diagnostic] judge rejected streamed response after {elapsed_ms:.0f}ms: "
+            f"{'; '.join(result.problems) or result.repair_instruction}",
+            file=sys.stderr,
+        )
+    else:
+        print(f"[diagnostic] judge accepted streamed response after {elapsed_ms:.0f}ms", file=sys.stderr)
+
+
 def main() -> int:
     safety_classifier = build_safety_classifier()
     language_classifier = MotivationalLanguageClassifier()
@@ -135,7 +181,7 @@ def main() -> int:
     miti_validator = build_miti_validator()
     state = SessionState()
 
-    opening = engine.opening_response(state)
+    opening = engine.opening_response(state) if _generated_opening_enabled() else counsellor.opening()
     state.add_turn("counsellor", opening)
     print(f"Counsellor: {opening}")
 
@@ -162,19 +208,56 @@ def main() -> int:
             continue
 
         state.add_turn("user", user_text)
+        turn_started = time.perf_counter()
+        safety_started = time.perf_counter()
         state.safety = safety_classifier.classify(user_text, state.transcript())
+        timings = {"safety": time.perf_counter() - safety_started}
         state.language = language_classifier.classify(user_text)
         state.dynamics = dynamics_analyzer.update(state)
         state.process = process_identifier.identify(state)
 
         try:
-            response = engine.next_response(state)
+            print("\nCounsellor: ", end="", flush=True)
+            response_parts: list[str] = []
+            stream_started = time.perf_counter()
+            first_chunk_at: float | None = None
+            for chunk in engine.stream_next_response_with_deadline(
+                state,
+                first_token_timeout_seconds=_first_token_timeout_seconds(),
+            ):
+                if first_chunk_at is None:
+                    first_chunk_at = time.perf_counter()
+                    timings["first_token"] = first_chunk_at - stream_started
+                response_parts.append(chunk)
+                print(chunk, end="", flush=True)
+            print()
+            response = "".join(response_parts).strip()
+            timings["stream_complete"] = time.perf_counter() - stream_started
         except Exception as exc:
             response = FallbackPolicy().response(state)
             print(f"[diagnostic] model path failed, used fallback: {exc}", file=sys.stderr)
+            print(f"\nCounsellor: {response}")
 
+        validation_started = time.perf_counter()
+        local_result = engine.local_validation(state, response)
+        timings["local_validation"] = time.perf_counter() - validation_started
+        timings["turn_total"] = time.perf_counter() - turn_started
+        if _latency_debug_enabled() and not local_result.accepted:
+            print(
+                f"[diagnostic] local validation flagged streamed response: "
+                f"{'; '.join(local_result.problems) or local_result.repair_instruction}",
+                file=sys.stderr,
+            )
+        if _latency_debug_enabled() and response:
+            diagnostic_state = copy.deepcopy(state)
+            thread = threading.Thread(
+                target=_run_diagnostic_judge,
+                args=(engine, diagnostic_state, response),
+                daemon=True,
+            )
+            thread.start()
+        _print_latency(timings, mode=engine.last_stream_mode)
         state.add_turn("counsellor", response)
-        print(f"\nCounsellor: {response}")
 
 
 if __name__ == "__main__":

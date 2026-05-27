@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import queue
+import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from mi_counsellor.domain import ConversationTurn, SafetyLevel, SessionState, TalkType
@@ -101,6 +104,62 @@ class Counsellor:
             task_used=str(data.get("mi_task_used", "")).strip(),
         )
 
+    def stream_text(self, state: SessionState) -> Iterator[str]:
+        prompt = self._build_text_prompt(state)
+        stream_complete = getattr(self.model, "stream_complete", None)
+        if callable(stream_complete):
+            yield from stream_complete(
+                [
+                    {"role": "system", "content": MI_STYLE_GUIDE},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.45,
+            )
+            return
+        raise RuntimeError("streaming is unavailable for this chat model")
+
+    def local_response(self, state: SessionState) -> str:
+        if state.safety.level == SafetyLevel.CAUTION:
+            return (
+                "That sounds important, and I want to stay careful with medical details. "
+                "A clinician or quitline can help with specifics. "
+                "What feels most useful to sort through here about smoking and your own choices?"
+            )
+        if state.language.dominant == TalkType.DISCORD:
+            return (
+                "This may not be feeling useful right now, and it is completely your choice whether to continue. "
+                "What would you prefer from here?"
+            )
+        if state.dynamics.stagnant:
+            return (
+                "We may be circling the same spot. "
+                "Would it help to look at this from a different angle, or would you rather pause?"
+            )
+        if state.language.dominant == TalkType.SUSTAIN:
+            return (
+                "Smoking sounds like it is serving a real purpose for you. "
+                "What do you like about it, and what, if anything, worries you about keeping things as they are?"
+            )
+        if state.language.dominant == TalkType.AMBIVALENCE:
+            return (
+                "Part of you can see reasons to change, and part of you has good reasons not to rush. "
+                "What feels strongest on each side right now?"
+            )
+        if state.process.task.value == "planning" and state.language.readiness_hint == "high":
+            return (
+                "It sounds like there may be some readiness there. "
+                "Would it be okay to talk through one small next step while keeping it fully your choice?"
+            )
+        if state.process.task.value == "focusing":
+            return (
+                "There are a few directions we could go with this. "
+                "Would it be useful to focus on what smoking is doing for you now, or on what has you wondering about change?"
+            )
+        return (
+            "It sounds like smoking has a real place in your day. "
+            "What feels most important to understand about it right now?"
+        )
+
     def _build_prompt(self, state: SessionState, repair_instruction: str | None) -> str:
         return f"""
 Conversation:
@@ -119,6 +178,26 @@ Use this guidance to adapt to the user's current behavior without sounding scrip
 {f"Repair the prior response using this instruction: {repair_instruction}" if repair_instruction else ""}
 
 {COUNSELLOR_JSON_PROMPT}
+"""
+
+    def _build_text_prompt(self, state: SessionState) -> str:
+        return f"""
+Conversation:
+{state.transcript()}
+
+Current safety/scope assessment: {state.safety.level.value}; reasons={state.safety.reasons}
+Current MI process task: {state.process.task.value}; confidence={state.process.confidence}; rationale={state.process.rationale}; slow_down={state.process.slow_down}
+Current motivational language: {state.language.dominant.value}; readiness={state.language.readiness_hint}; change={state.language.change_markers}; sustain={state.language.sustain_markers}; discord={state.language.discord_markers}
+Current session dynamics: rapport={state.dynamics.rapport}; goal_alignment={state.dynamics.goal_alignment}; motivation_direction={state.dynamics.motivation_direction.value}; stagnant={state.dynamics.stagnant}; recommended_strategy={state.dynamics.recommended_strategy}
+
+Smoking cessation is the focus. Do not give a quit plan unless the user has shown readiness and you ask permission.
+If caution scope is present, be supportive and suggest a qualified clinician for medical specifics.
+Keep this turn brief enough to invite continued conversation.
+Use this guidance to adapt to the user's current behavior without sounding scripted:
+{MI_RESPONSE_GUIDANCE}
+
+Return only the counsellor message text.
+Do not wrap the response in JSON, Markdown, quotes, labels, or explanations.
 """
 
     def _build_opening_prompt(self, repair_instruction: str | None) -> str:
@@ -182,6 +261,21 @@ Candidate response:
             ethical_context_ok=bool(data.get("ethical_context_ok", True)),
             problems=problems,
             repair_instruction=self._repair_instruction(str(data.get("repair_instruction", "")).strip(), local_problems),
+        )
+
+    def evaluate_local(self, state: SessionState, draft: DraftResponse) -> JudgeResult:
+        local_problems = self._local_validation_problems(state, draft)
+        return JudgeResult(
+            safe=not any("crisis protocol" in item for item in local_problems),
+            mi_consistent=True,
+            premature_advice=any("permission" in item for item in local_problems),
+            premature_planning=False,
+            handles_scope=True,
+            concise=self._is_concise(draft.text)
+            and not any("verbose" in item or "drift" in item for item in local_problems),
+            ethical_context_ok=True,
+            problems=local_problems,
+            repair_instruction=self._repair_instruction("", local_problems),
         )
 
     @staticmethod
@@ -272,6 +366,7 @@ class MIEngine:
         self.counsellor = counsellor
         self.judge = judge
         self.fallback = fallback
+        self.last_stream_mode = "not_started"
 
     def opening_response(self, state: SessionState) -> str:
         repair_instruction: str | None = None
@@ -310,6 +405,94 @@ class MIEngine:
             repair_instruction = last_judge.repair_instruction or "; ".join(last_judge.problems)
 
         return self.fallback.response(state, last_judge)
+
+    def stream_next_response(self, state: SessionState) -> Iterator[str]:
+        if state.safety.level in {SafetyLevel.URGENT, SafetyLevel.OUT_OF_SCOPE}:
+            self.last_stream_mode = "safety_fallback"
+            yield self.fallback.response(state)
+            return
+
+        chunks: list[str] = []
+        try:
+            for chunk in self.counsellor.stream_text(state):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                yield chunk
+        except Exception:
+            if not chunks:
+                yield self.fallback.response(state)
+            return
+
+        if not "".join(chunks).strip():
+            self.last_stream_mode = "local_stream_error"
+            yield self.fallback.response(state)
+
+    def stream_next_response_with_deadline(
+        self,
+        state: SessionState,
+        *,
+        first_token_timeout_seconds: float,
+    ) -> Iterator[str]:
+        if state.safety.level in {SafetyLevel.URGENT, SafetyLevel.OUT_OF_SCOPE}:
+            self.last_stream_mode = "safety_fallback"
+            yield self.fallback.response(state)
+            return
+
+        events: queue.Queue[tuple[str, str | BaseException | None]] = queue.Queue()
+
+        def worker() -> None:
+            try:
+                emitted = False
+                for chunk in self.counsellor.stream_text(state):
+                    if not chunk:
+                        continue
+                    emitted = True
+                    events.put(("chunk", chunk))
+                events.put(("done", None if emitted else RuntimeError("stream produced no text")))
+            except BaseException as exc:
+                events.put(("error", exc))
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        try:
+            first_kind, first_payload = events.get(timeout=first_token_timeout_seconds)
+        except queue.Empty:
+            self.last_stream_mode = "local_timeout"
+            yield self.counsellor.local_response(state)
+            return
+
+        if first_kind != "chunk":
+            self.last_stream_mode = "local_stream_error"
+            yield self.counsellor.local_response(state)
+            return
+
+        self.last_stream_mode = "llm_stream"
+        yield str(first_payload)
+
+        while True:
+            kind, payload = events.get()
+            if kind == "chunk":
+                yield str(payload)
+            else:
+                return
+
+    def local_validation(self, state: SessionState, text: str) -> JudgeResult:
+        draft = DraftResponse(
+            text=text.strip(),
+            intent="streamed response",
+            task_used=state.process.task.value,
+        )
+        return self.judge.evaluate_local(state, draft)
+
+    def diagnostic_judge(self, state: SessionState, text: str) -> JudgeResult:
+        draft = DraftResponse(
+            text=text.strip(),
+            intent="streamed response",
+            task_used=state.process.task.value,
+        )
+        return self.judge.evaluate(state, draft)
 
     @staticmethod
     def _opening_text_allowed(text: str) -> bool:

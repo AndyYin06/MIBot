@@ -4,6 +4,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -20,14 +21,9 @@ class OpenAICompatibleChatModel:
     base_url: str = "https://api.openai.com/v1"
     timeout_seconds: int = 45
 
-    def complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> str:
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-        }
+    def _request(self, payload: dict) -> urllib.request.Request:
         body = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
+        return urllib.request.Request(
             f"{self.base_url.rstrip('/')}/chat/completions",
             data=body,
             headers={
@@ -36,12 +32,47 @@ class OpenAICompatibleChatModel:
             },
             method="POST",
         )
+
+    def complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> str:
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+        }
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+            with urllib.request.urlopen(self._request(payload), timeout=self.timeout_seconds) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.URLError as exc:
             raise RuntimeError(f"LLM request failed: {exc}") from exc
         return data["choices"][0]["message"]["content"]
+
+    def stream_complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> Iterator[str]:
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": True,
+            "stream_options": {"include_obfuscation": False},
+        }
+        try:
+            with urllib.request.urlopen(self._request(payload), timeout=self.timeout_seconds) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    event = line.removeprefix("data:").strip()
+                    if event == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(event)
+                    except json.JSONDecodeError:
+                        continue
+                    for choice in data.get("choices", []):
+                        content = choice.get("delta", {}).get("content")
+                        if content:
+                            yield str(content)
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"LLM streaming request failed: {exc}") from exc
 
 
 class DemoChatModel:
@@ -49,6 +80,7 @@ class DemoChatModel:
 
     def complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> str:
         joined = "\n".join(message["content"] for message in messages[-3:])
+        plain_text = "Return only the counsellor message text." in joined
         if "Classify the latest user turn for safety and scope" in joined:
             return json.dumps(
                 {
@@ -128,7 +160,7 @@ class DemoChatModel:
             )
         if "This is the first counsellor turn" in joined:
             response = "Hi, I'm glad you're here. What's been on your mind about smoking lately?"
-            return json.dumps(
+            return response if plain_text else json.dumps(
                 {
                     "response": response,
                     "intent": "open warmly and invite the user's perspective",
@@ -176,6 +208,8 @@ class DemoChatModel:
                 "It sounds like smoking has a real place in your day, and part of you is wondering what it might be like if that changed. "
                 "What feels most important to understand about your smoking right now?"
             )
+        if plain_text:
+            return response
         return json.dumps(
             {
                 "response": response,
@@ -183,6 +217,9 @@ class DemoChatModel:
                 "mi_task_used": "evoking",
             }
         )
+
+    def stream_complete(self, messages: list[dict[str, str]], *, temperature: float = 0.4) -> Iterator[str]:
+        yield self.complete(messages, temperature=temperature)
 
 
 def build_chat_model(env_prefix: str, default_model: str) -> ChatModel:
